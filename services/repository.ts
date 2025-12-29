@@ -107,25 +107,41 @@ export const userRepo = {
     if (!supabase) return { user: null, error: '系统未初始化 (Missing DB Key)' };
 
     try {
-        const { data, error } = await supabase.from('profiles').select('*').eq('username', username).eq('password', code).maybeSingle();
+        let rawData = null;
+
+        // 1. 优先尝试安全 RPC 登录 (Recommended)
+        // 这种方式允许我们在数据库端验证密码，而不需要让 profiles 表对公众可读
+        const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: username, _password: code });
         
-        if (error) return { user: null, error: `DB Error: ${getErrorMessage(error)}` };
-        if (!data) return { user: null, error: '账号或密码错误' };
+        if (!rpcError && rpcData) {
+             // RPC 成功返回
+             // 注意：如果是单条记录，rpcData可能就是对象；如果是数组则取第一个
+             rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        } else {
+             // 2. 降级回退 (Fallback)：直接查询表
+             // 如果用户还没在数据库创建 RPC 函数，代码也不会崩，而是走老路
+             console.warn("RPC Login skipped or failed, falling back to direct select.", rpcError?.message);
+             const { data, error } = await supabase.from('profiles').select('*').eq('username', username).eq('password', code).maybeSingle();
+             if (error) return { user: null, error: `DB Error: ${getErrorMessage(error)}` };
+             rawData = data;
+        }
+
+        if (!rawData) return { user: null, error: '账号或密码错误' };
         
-        const extraData = data.data || {};
+        const extraData = rawData.data || {};
         if (extraData.isDeleted) return { user: null, error: '账号不存在' };
         if (extraData.isSuspended) return { user: null, error: '账号已停用' };
 
         return { 
             user: {
-                id: data.id,
-                username: data.username,
-                role: data.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
+                id: rawData.id,
+                username: rawData.username,
+                role: rawData.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
                 inviteCode: 'CLOUD', 
                 totalQuota: 100,
-                quotaRemaining: data.quota_remaining || 0,
+                quotaRemaining: rawData.quota_remaining || 0,
                 expiryDate: '2099-12-31',
-                createdAt: new Date(data.created_at).getTime(),
+                createdAt: new Date(rawData.created_at).getTime(),
                 isSuspended: false,
                 lastIp: extraData.lastIp,
                 totalOnlineSeconds: extraData.totalOnlineSeconds || 0,
