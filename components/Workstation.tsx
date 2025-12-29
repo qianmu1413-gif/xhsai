@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { PersonaAnalysis, FidelityMode, ChatMessage, Project, NoteDraft, User, BulkNote, AttachedFile, SocialNote, PublishedRecord, PreviewState } from '../types';
 import { streamExpertGeneration, streamPersonaAnalysis, analyzeMaterials } from '../services/geminiService';
@@ -6,7 +5,7 @@ import { fetchXhsNote, extractXhsUrls } from '../services/xhsService';
 import { projectRepo, fileRepo, linkRepo, userRepo, getErrorMessage } from '../services/repository'; 
 import { uploadToCOS, deleteFromCOS } from '../services/cosService'; 
 import { publishToXHS } from '../services/publishService';
-import { DEFAULT_MANUAL_PERSONA } from '../constants';
+import { DEFAULT_MANUAL_PERSONA, APP_NAME } from '../constants';
 import MobilePreview from './MobilePreview';
 import PersonaTrainer from './PersonaTrainer';
 import Toast, { ToastState } from './Toast';
@@ -52,11 +51,8 @@ interface WorkstationProps {
 // ... (Formatted Text Renderer & Helpers)
 const renderFormattedText = (text: string) => {
   if (!text) return null;
-  // Clean up "[话题]" artifacts commonly found in copy-paste
-  // Also remove #话题 suffix
   const cleanText = text.replace(/\[话题\]/g, '').replace(/#话题/g, ''); 
   
-  // Split by bold (**text**) or tags (#tag)
   const parts = cleanText.split(/(\*\*|#[^\s#]+)/g);
   return (
     <div className="whitespace-pre-wrap leading-relaxed text-justify">
@@ -204,6 +200,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   const [publishedHistory, setPublishedHistory] = useState<PublishedRecord[]>([]);
   const [isUploadingFile, setIsUploadingFile] = useState(false); 
   const [syncStatus, setSyncStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [customCategories, setCustomCategories] = useState<string[]>([]); // New state for categories
 
   const [currentInput, setCurrentInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -345,6 +342,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
         setPreviewState(project.previewState || { title: '', images: [] }); 
         setDrafts(project.drafts || []);
         setPublishedHistory(project.publishedHistory || []);
+        setCustomCategories(project.categories || []);
         // Load material analysis
         setMaterialAnalysis(project.materialAnalysis || '');
         if (project.materialAnalysis) setShowAnalysisArea(true);
@@ -374,8 +372,9 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           generatedContent, 
           previewState, 
           drafts, 
-          publishedHistory,
-          materialAnalysis // Save this new field
+          publishedHistory, 
+          materialAnalysis,
+          categories: customCategories
       };
       setProjects(prev => prev.map(p => p.id === currentProjectId ? updatedProject : p));
       try {
@@ -389,7 +388,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
     };
     const timer = setTimeout(saveState, 2000);
     return () => clearTimeout(timer);
-  }, [contextText, attachedFiles, socialNotes, chatHistory, fidelity, wordCountLimit, generatedContent, previewState, drafts, publishedHistory, materialAnalysis]);
+  }, [contextText, attachedFiles, socialNotes, chatHistory, fidelity, wordCountLimit, generatedContent, previewState, drafts, publishedHistory, materialAnalysis, customCategories]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
 
@@ -610,7 +609,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       const full = `${note.title}\n\n${note.content}`;
       setGeneratedContent(full);
       setPreviewState(prev => ({ ...prev, title: note.title }));
-      setDrafts(prev => [{ id: Math.random().toString(36).substr(2, 9), title: note.title, content: full, personaName: pName, createdAt: Date.now() }, ...prev]);
+      setDrafts(prev => [{ id: Math.random().toString(36).substr(2, 9), title: note.title, content: full, personaName: pName, images: previewState.images, createdAt: Date.now() }, ...prev]);
       if (window.innerWidth < 1024) setActiveTab('preview');
       showToast("已采纳并生成草稿");
   }, [currentProjectId, projects]);
