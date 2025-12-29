@@ -1,5 +1,5 @@
 
-export const APP_NAME = "写小红书贼牛逼的网站";
+export const APP_NAME = "写小红书贼牛逼网站";
 
 export const ANALYSIS_SYSTEM_PROMPT = `
 你是一位专注于社交媒体内容的资深语言分析师，特别擅长分析“小红书”平台的爆款笔记风格。

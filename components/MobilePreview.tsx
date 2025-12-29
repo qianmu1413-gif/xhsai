@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Battery, Signal, Wifi, ChevronLeft, Image as ImageIcon, X, ChevronRight, Check, Plus, Trash2, Save, LayoutTemplate, Archive, Loader2, QrCode, CheckCircle, Download, Share2, Heart, MessageCircle, Star, MoreHorizontal, MapPin, Settings2, GripHorizontal, ArrowLeft, Crop, Maximize2, AlertCircle, Move, ZoomIn, ArrowRight, CheckSquare, Square, Link as LinkIcon, Folder, FolderOpen, Filter } from 'lucide-react';
+import { Battery, Signal, Wifi, ChevronLeft, Image as ImageIcon, X, ChevronRight, Check, Plus, Trash2, Save, LayoutTemplate, Archive, Loader2, QrCode, CheckCircle, Download, Share2, Heart, MessageCircle, Star, MoreHorizontal, MapPin, Settings2, GripHorizontal, ArrowLeft, Crop, Maximize2, AlertCircle, Move, ZoomIn, ArrowRight, CheckSquare, Square, Link as LinkIcon, Folder, FolderOpen, Filter, MousePointerClick } from 'lucide-react';
 import { publishToXHS } from '../services/publishService';
 import { NoteDraft, PublishedRecord, User } from '../types';
 import Toast, { ToastState } from './Toast';
@@ -229,7 +229,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'preview' | 'all' | 'drafts' | 'published'>('preview');
   const [isPublishing, setIsPublishing] = useState(false);
-  const [publishResult, setPublishResult] = useState<{ qrcode: string; title: string; cover: string }[] | null>(null);
+  const [viewingQrCode, setViewingQrCode] = useState<{ qrcode: string; title: string; cover: string } | null>(null);
   const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'success' });
   const [croppingImg, setCroppingImg] = useState<{ url: string, index: number } | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -240,6 +240,30 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
+
+  // --- CAROUSEL DRAG LOGIC ---
+  const [isDragScroll, setIsDragScroll] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+
+  const handleDragStart = (e: React.MouseEvent) => {
+      if (!carouselRef.current) return;
+      setIsDragScroll(true);
+      setDragStartX(e.pageX - carouselRef.current.offsetLeft);
+      setScrollLeft(carouselRef.current.scrollLeft);
+  };
+
+  const handleDragMove = (e: React.MouseEvent) => {
+      if (!isDragScroll || !carouselRef.current) return;
+      e.preventDefault();
+      const x = e.pageX - carouselRef.current.offsetLeft;
+      const walk = (x - dragStartX) * 1.5; // Scroll speed multiplier
+      carouselRef.current.scrollLeft = scrollLeft - walk;
+  };
+
+  const handleDragEnd = () => {
+      setIsDragScroll(false);
+  };
 
   // Safe Extraction Logic
   const title = content.split('\n')[0] || '';
@@ -272,10 +296,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
         if (!groups[category]) groups[category] = [];
         groups[category].push({ ...pub, _type: 'published' });
     });
-
-    // Initialize expanded state for new categories
-    // Note: We don't want to reset it on every render, so this side-effect is tricky inside useMemo. 
-    // Handled by default expanding all keys or keeping simple strings.
     
     return groups;
   }, [drafts, publishedHistory]);
@@ -309,7 +329,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       setIsPublishing(true);
       try {
           const qrcode = await publishToXHS({ title, content, imageUrls: finalImages });
-          setPublishResult([{ qrcode, title, cover: finalImages[0] }]);
+          setViewingQrCode({ qrcode, title, cover: finalImages[0] }); // Show new pretty modal
           if (onSavePublished) {
               onSavePublished({
                   id: Date.now().toString(),
@@ -329,10 +349,13 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files.length > 0 && onFileUpload) {
+           // Feedback for user immediately
+           showToast("图片正在上传中，请稍后...", "info");
            const files = Array.from(e.target.files);
            const newUrls = await onFileUpload(files);
            if (newUrls && newUrls.length > 0) {
                onImagesChange([...images, ...newUrls]);
+               showToast("上传成功");
            }
       }
       // Reset input
@@ -353,9 +376,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       if (!onPublishBatch) return;
 
       const itemsToPublish: any[] = [];
-      const currentList = activeTab === 'drafts' ? drafts : publishedHistory; // Batch only works on flat lists for now
-      
-      // For "All" tab, batch action logic is complex, disabling for simplicity or map via ID check
       const allItems = [...drafts, ...publishedHistory];
 
       selectedIds.forEach(id => {
@@ -363,7 +383,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
           if (item) {
               const itemTitle = item.title;
               const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(itemTitle)];
-              
               itemsToPublish.push({
                   title: itemTitle,
                   content: 'content' in item ? item.content : itemTitle,
@@ -391,13 +410,10 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   
   const handleBatchDelete = () => {
       if (selectedIds.size === 0) return;
-      
-      // Naive implementation: try to delete from both lists by ID
       selectedIds.forEach(id => {
           if (drafts.some(d => d.id === id)) onDeleteDraft && onDeleteDraft(id);
           if (publishedHistory.some(p => p.id === id)) onDeletePublished && onDeletePublished(id);
       });
-      
       showToast("已批量删除");
       setIsSelectionMode(false);
       setSelectedIds(new Set());
@@ -414,6 +430,35 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       }
   };
 
+  const handleItemClick = (item: any, type: 'draft' | 'published') => {
+      if (isSelectionMode) {
+          toggleSelection(item.id);
+          return;
+      }
+      
+      // Auto-populate editor and switch to preview
+      const itemTitle = item.title || '';
+      // Drafts have 'content', Published might not have full content stored in publishedHistory record (depending on type def), 
+      // but for this app structure, publishedHistory records are simple.
+      // If content is missing, we use title.
+      const itemContent = 'content' in item ? item.content : itemTitle; 
+      const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(itemTitle)];
+      
+      onContentChange(itemContent);
+      onImagesChange(itemImages);
+      setActiveTab('preview');
+      showToast("已加载笔记内容");
+  };
+
+  const handleQrClick = (e: React.MouseEvent, item: any) => {
+      e.stopPropagation();
+      setViewingQrCode({
+          qrcode: item.qrCodeUrl,
+          title: item.title,
+          cover: item.coverImage
+      });
+  };
+
   // Render Grid Item (Common for Drafts and Published)
   const renderGridItem = (item: any, type: 'draft' | 'published') => {
       const isSelected = selectedIds.has(item.id);
@@ -422,17 +467,8 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       return (
           <div 
             key={item.id} 
-            className="bg-white rounded-lg overflow-hidden shadow-sm break-inside-avoid mb-2 group relative border border-slate-100 touch-manipulation transform transition-all duration-200 active:scale-95"
-            onClick={() => {
-                if (isSelectionMode) {
-                    toggleSelection(item.id);
-                } else {
-                    if (type === 'draft' && onSelectDraft) {
-                        onSelectDraft(item);
-                        setActiveTab('preview');
-                    }
-                }
-            }}
+            className="bg-white rounded-lg overflow-hidden shadow-sm break-inside-avoid mb-2 group relative border border-slate-100 touch-manipulation transform transition-all duration-200 active:scale-95 cursor-pointer"
+            onClick={() => handleItemClick(item, type)}
           >
               <div className="aspect-[3/4] relative bg-slate-100">
                   <img src={cover} className="w-full h-full object-cover" loading="lazy" />
@@ -454,9 +490,14 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                           <Trash2 size={12} />
                       </button>
                   )}
+                  {/* Interactive QR Code for Published items */}
                   {type === 'published' && item.qrCodeUrl && !isSelectionMode && (
-                      <div className="absolute bottom-2 right-2 bg-white/90 p-1 rounded-md shadow-sm">
-                          <QrCode size={12} className="text-slate-800"/>
+                      <div 
+                          onClick={(e) => handleQrClick(e, item)}
+                          className="absolute bottom-2 right-2 bg-white/90 p-1.5 rounded-full shadow-sm hover:bg-white hover:scale-110 transition-all z-10 text-slate-800 hover:text-rose-500"
+                          title="查看发布码"
+                      >
+                          <QrCode size={14} />
                       </div>
                   )}
               </div>
@@ -480,48 +521,45 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
 
   return (
     <>
-    {/* Global Full-Screen Publish Modal */}
-    {publishResult && (
-        <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-fade-in">
-            <button onClick={() => setPublishResult(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors p-2 active:scale-90"><X size={32}/></button>
-            
-            <div className="flex flex-col items-center max-w-md w-full">
-                <div className="flex items-center gap-2 mb-8">
-                    <div className="bg-emerald-500 text-white p-2 rounded-full shadow-lg shadow-emerald-500/30">
-                        <Check size={24} strokeWidth={3} />
+    {/* Re-designed QR Code Modal */}
+    {viewingQrCode && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in" onClick={() => setViewingQrCode(null)}>
+            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl overflow-hidden relative transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+                {/* Decorative Header */}
+                <div className="h-32 bg-gradient-to-br from-rose-500 to-orange-400 relative p-6 flex flex-col justify-between">
+                    <div className="flex justify-between items-start">
+                        <div className="w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white">
+                            <Check size={20} strokeWidth={3} />
+                        </div>
+                        <button onClick={() => setViewingQrCode(null)} className="text-white/70 hover:text-white transition-colors bg-black/10 rounded-full p-1"><X size={20}/></button>
                     </div>
-                    <h2 className="text-2xl font-bold text-white tracking-tight">发布任务已提交</h2>
+                    <h2 className="text-2xl font-bold text-white tracking-tight">发布准备就绪</h2>
                 </div>
 
-                {publishResult.map((res, idx) => (
-                    <div key={idx} className="bg-white rounded-3xl p-6 w-full shadow-2xl overflow-hidden relative mb-4 last:mb-0">
-                        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-rose-500 to-orange-500"></div>
-                        
-                        <div className="flex gap-5 mb-6">
-                            <div className="w-24 h-32 rounded-xl bg-slate-100 shrink-0 overflow-hidden shadow-md border border-slate-100">
-                                <img src={res.cover} className="w-full h-full object-cover" />
-                            </div>
-                            <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                <h3 className="font-bold text-lg text-slate-900 line-clamp-2 leading-snug mb-2">{res.title}</h3>
-                                <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                                    准备就绪
-                                </div>
-                            </div>
+                {/* Content */}
+                <div className="px-6 pb-8 -mt-6">
+                    <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 flex flex-col items-center">
+                        <div className="w-full aspect-[4/3] rounded-xl overflow-hidden mb-4 relative bg-slate-100">
+                             <img src={viewingQrCode.cover} className="w-full h-full object-cover" />
+                             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end p-3">
+                                 <p className="text-white text-xs font-bold line-clamp-1">{viewingQrCode.title}</p>
+                             </div>
                         </div>
 
-                        <div className="border-t border-slate-100 pt-6 flex flex-col items-center">
-                            <div className="bg-white p-2 rounded-xl border border-slate-100 shadow-sm mb-3">
-                                <QRCodeDisplay value={res.qrcode} size={160} />
-                            </div>
-                            <p className="text-xs text-slate-400 text-center font-medium">请使用小红书 App 扫码<br/>确认最终效果并发布</p>
+                        <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200 mb-4">
+                            <QRCodeDisplay value={viewingQrCode.qrcode} size={180} />
                         </div>
+
+                        <p className="text-xs text-slate-500 text-center font-medium leading-relaxed">
+                            请使用 <span className="text-rose-500 font-bold">小红书 App</span> 扫码<br/>
+                            确认预览效果并完成发布
+                        </p>
                     </div>
-                ))}
 
-                <button onClick={() => setPublishResult(null)} className="mt-8 px-10 py-3.5 bg-white text-slate-900 rounded-full font-bold shadow-xl active:scale-95 hover:bg-slate-50 transition-all w-full max-w-[200px]">
-                    完成
-                </button>
+                    <button onClick={() => setViewingQrCode(null)} className="mt-6 w-full py-3.5 bg-slate-900 text-white rounded-xl font-bold text-sm shadow-xl active:scale-95 transition-transform hover:bg-black">
+                        我知道了
+                    </button>
+                </div>
             </div>
         </div>
     )}
@@ -565,13 +603,20 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
         <div className="flex-1 overflow-y-auto no-scrollbar bg-[#F8F8F8] relative">
             {activeTab === 'preview' && (
                 <div className="min-h-full">
-                    {/* Image Carousel (Updated) */}
+                    {/* Image Carousel (Updated with Drag) */}
                     <div className="aspect-[3/4] bg-white relative group overflow-hidden flex items-center justify-center">
                         {images.length > 0 ? (
-                            <div ref={carouselRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar scroll-smooth">
+                            <div 
+                                ref={carouselRef}
+                                className="w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar cursor-grab active:cursor-grabbing"
+                                onMouseDown={handleDragStart}
+                                onMouseMove={handleDragMove}
+                                onMouseUp={handleDragEnd}
+                                onMouseLeave={handleDragEnd}
+                            >
                                 {images.map((img, idx) => (
                                     <div key={idx} className="w-full h-full shrink-0 snap-center relative flex items-center justify-center bg-white group/img select-none">
-                                        <img src={img} className="max-w-full max-h-full object-contain pointer-events-none" /> {/* Disable pointer events on IMG to allow scroll drag on parent */}
+                                        <img src={img} className="max-w-full max-h-full object-contain pointer-events-none" /> 
                                         <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover/img:opacity-100 transition-opacity z-20 pointer-events-auto">
                                              <button onClick={(e) => { e.stopPropagation(); setCroppingImg({url: img, index: idx}); }} className="p-2 bg-black/50 text-white rounded-full backdrop-blur-sm hover:bg-black/70 active:scale-90 transition-transform"><Crop size={14}/></button>
                                              <button onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter((_, i) => i !== idx)); }} className="p-2 bg-red-500/80 text-white rounded-full backdrop-blur-sm hover:bg-red-600 active:scale-90 transition-transform"><Trash2 size={14}/></button>
@@ -582,7 +627,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                             </div>
                         ) : (
                             <div className="w-full h-full relative group">
-                                <img src={currentPlaceholder} className="w-full h-full object-cover opacity-80" />
+                                <img src={currentPlaceholder} className="w-full h-full object-cover opacity-80 pointer-events-none" />
                                 <div className="absolute inset-0 bg-black/10 flex flex-col items-center justify-center text-white backdrop-blur-[2px] transition-all group-hover:backdrop-blur-none group-hover:bg-black/20">
                                     <span className="text-xs font-bold drop-shadow-md opacity-50">暂无封面</span>
                                 </div>

@@ -57,7 +57,7 @@ const renderFormattedText = (text: string) => {
   const cleanText = text.replace(/\[话题\]/g, '').replace(/#话题/g, ''); 
   
   // Split by bold (**text**) or tags (#tag)
-  const parts = cleanText.split(/(\*\*.*?\*\*|#[^\s#]+)/g);
+  const parts = cleanText.split(/(\*\*|#[^\s#]+)/g);
   return (
     <div className="whitespace-pre-wrap leading-relaxed text-justify">
       {parts.map((part, index) => {
@@ -245,7 +245,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files?.length) return;
       setIsUploadingFile(true);
-      showToast("正在上传文件...", "info");
+      showToast("图片正在上传中，请稍后...", "info");
       
       const newFiles: AttachedFile[] = [];
       let successCount = 0;
