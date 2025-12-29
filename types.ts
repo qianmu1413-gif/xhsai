@@ -107,7 +107,6 @@ export interface NoteDraft {
   content: string;
   personaName: string; 
   images?: string[]; // Added: Store draft images
-  category?: string; // Added: Custom category
   createdAt: number;
   isDeleted?: boolean;
 }
@@ -143,7 +142,6 @@ export interface Project {
   previewState?: PreviewState; 
   drafts?: NoteDraft[];
   publishedHistory?: PublishedRecord[]; 
-  categories?: string[]; // Added: Custom categories list
   isDeleted?: boolean; // 项目本身的软删除
   materialAnalysis?: string;
 }
