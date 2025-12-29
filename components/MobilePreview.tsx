@@ -1,6 +1,6 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Battery, Signal, Wifi, ChevronLeft, Image as ImageIcon, X, ChevronRight, Check, Plus, Trash2, Save, LayoutTemplate, Archive, Loader2, QrCode, CheckCircle, Download, Share2, Heart, MessageCircle, Star, MoreHorizontal, MapPin, Settings2, GripHorizontal, ArrowLeft, Crop, Maximize2, AlertCircle, Move, ZoomIn, ArrowRight, CheckSquare, Square, Link as LinkIcon } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Battery, Signal, Wifi, ChevronLeft, Image as ImageIcon, X, ChevronRight, Check, Plus, Trash2, Save, LayoutTemplate, Archive, Loader2, QrCode, CheckCircle, Download, Share2, Heart, MessageCircle, Star, MoreHorizontal, MapPin, Settings2, GripHorizontal, ArrowLeft, Crop, Maximize2, AlertCircle, Move, ZoomIn, ArrowRight, CheckSquare, Square, Link as LinkIcon, Folder, FolderOpen, Filter } from 'lucide-react';
 import { publishToXHS } from '../services/publishService';
 import { NoteDraft, PublishedRecord, User } from '../types';
 import Toast, { ToastState } from './Toast';
@@ -227,7 +227,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   publishedHistory = [], onSavePublished, onDeletePublished, onDeletePublishedBatch,
   onFileUpload, user, onPublishBatch
 }) => {
-  const [activeTab, setActiveTab] = useState<'preview' | 'drafts' | 'published'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'all' | 'drafts' | 'published'>('preview');
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<{ qrcode: string; title: string; cover: string }[] | null>(null);
   const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'success' });
@@ -235,7 +235,11 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
+  // Categorization State for "All" Tab
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['Drafts', 'Published']));
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const carouselRef = useRef<HTMLDivElement>(null);
 
   // Safe Extraction Logic
   const title = content.split('\n')[0] || '';
@@ -250,6 +254,46 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const currentPlaceholder = React.useMemo(() => getRandomImage(title || 'default'), [title]);
 
   const showToast = (msg: string, type: 'success'|'error'|'info' = 'success') => setToast({ show: true, message: msg, type });
+
+  // --- GROUPING LOGIC FOR "ALL" TAB ---
+  const groupedItems = useMemo(() => {
+    const groups: Record<string, any[]> = {};
+
+    // Group Drafts by Persona Name
+    drafts.forEach(draft => {
+        const category = draft.personaName ? `📂 ${draft.personaName}` : '📁 未分类草稿';
+        if (!groups[category]) groups[category] = [];
+        groups[category].push({ ...draft, _type: 'draft' });
+    });
+
+    // Group Published
+    publishedHistory.forEach(pub => {
+        const category = '🚀 已发布';
+        if (!groups[category]) groups[category] = [];
+        groups[category].push({ ...pub, _type: 'published' });
+    });
+
+    // Initialize expanded state for new categories
+    // Note: We don't want to reset it on every render, so this side-effect is tricky inside useMemo. 
+    // Handled by default expanding all keys or keeping simple strings.
+    
+    return groups;
+  }, [drafts, publishedHistory]);
+
+  const toggleCategory = (cat: string) => {
+      setExpandedCategories(prev => {
+          const next = new Set(prev);
+          if (next.has(cat)) next.delete(cat);
+          else next.add(cat);
+          return next;
+      });
+  };
+
+  useEffect(() => {
+     // Default expand all generated groups on first load/change
+     setExpandedCategories(new Set(Object.keys(groupedItems)));
+  }, [Object.keys(groupedItems).length]);
+
 
   const handlePublish = async () => {
       if (!title.trim()) return showToast("标题不能为空", 'error');
@@ -309,18 +353,20 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       if (!onPublishBatch) return;
 
       const itemsToPublish: any[] = [];
-      const currentList = activeTab === 'drafts' ? drafts : publishedHistory;
+      const currentList = activeTab === 'drafts' ? drafts : publishedHistory; // Batch only works on flat lists for now
       
+      // For "All" tab, batch action logic is complex, disabling for simplicity or map via ID check
+      const allItems = [...drafts, ...publishedHistory];
+
       selectedIds.forEach(id => {
-          const item = currentList?.find((i: any) => i.id === id);
+          const item: any = allItems.find((i: any) => i.id === id);
           if (item) {
               const itemTitle = item.title;
-              // Published history might not store full content in type, assume title for now or fetch
               const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(itemTitle)];
               
               itemsToPublish.push({
                   title: itemTitle,
-                  content: 'content' in item ? item.content : itemTitle, // Fallback
+                  content: 'content' in item ? item.content : itemTitle,
                   images: itemImages
               });
           }
@@ -328,14 +374,14 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
 
       if (itemsToPublish.length > 0) {
          showToast("开始批量生成链接...", "info");
-         
          if (itemsToPublish.length === 1) {
-             // Load into editor and publish
-             onSelectDraft && activeTab === 'drafts' && onSelectDraft(currentList?.find((d:any) => d.id === Array.from(selectedIds)[0]) as any);
-             showToast("已加载选中笔记，请点击底部发布按钮");
-             setActiveTab('preview');
+             const target = allItems.find((d:any) => d.id === Array.from(selectedIds)[0]);
+             if (target && 'content' in target) {
+                 onSelectDraft && onSelectDraft(target as NoteDraft);
+                 showToast("已加载选中笔记，请点击底部发布按钮");
+                 setActiveTab('preview');
+             }
          } else {
-             // Batch not fully implemented on backend, placeholder
              showToast(`批量生成 ${itemsToPublish.length} 条链接功能开发中`, 'info');
          }
       }
@@ -346,19 +392,23 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const handleBatchDelete = () => {
       if (selectedIds.size === 0) return;
       
-      if (activeTab === 'published' && onDeletePublishedBatch) {
-          onDeletePublishedBatch(Array.from(selectedIds));
-      } else if (activeTab === 'drafts' && onDeleteDraft) {
-          // Batch draft delete
-          selectedIds.forEach(id => onDeleteDraft(id));
-      }
+      // Naive implementation: try to delete from both lists by ID
+      selectedIds.forEach(id => {
+          if (drafts.some(d => d.id === id)) onDeleteDraft && onDeleteDraft(id);
+          if (publishedHistory.some(p => p.id === id)) onDeletePublished && onDeletePublished(id);
+      });
+      
       showToast("已批量删除");
       setIsSelectionMode(false);
       setSelectedIds(new Set());
   };
 
   const selectAll = () => {
-      const list = activeTab === 'drafts' ? drafts : publishedHistory;
+      let list: any[] = [];
+      if (activeTab === 'drafts') list = drafts;
+      else if (activeTab === 'published') list = publishedHistory;
+      else if (activeTab === 'all') list = [...drafts, ...publishedHistory];
+
       if (list) {
           setSelectedIds(new Set(list.map((i:any) => i.id)));
       }
@@ -372,7 +422,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       return (
           <div 
             key={item.id} 
-            className="bg-white rounded-lg overflow-hidden shadow-sm break-inside-avoid mb-2 group relative border border-slate-100 touch-manipulation"
+            className="bg-white rounded-lg overflow-hidden shadow-sm break-inside-avoid mb-2 group relative border border-slate-100 touch-manipulation transform transition-all duration-200 active:scale-95"
             onClick={() => {
                 if (isSelectionMode) {
                     toggleSelection(item.id);
@@ -385,7 +435,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             }}
           >
               <div className="aspect-[3/4] relative bg-slate-100">
-                  <img src={cover} className="w-full h-full object-cover" />
+                  <img src={cover} className="w-full h-full object-cover" loading="lazy" />
                   {isSelectionMode && (
                       <div className={`absolute top-2 right-2 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-rose-500 border-rose-500' : 'bg-black/20 border-white'}`}>
                           {isSelected && <Check size={12} className="text-white" />}
@@ -399,7 +449,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                             if (type === 'draft' && onDeleteDraft) onDeleteDraft(item.id);
                             if (type === 'published' && onDeletePublished) onDeletePublished(item.id);
                         }}
-                        className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all backdrop-blur-sm z-10"
+                        className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all backdrop-blur-sm z-10 active:scale-75"
                       >
                           <Trash2 size={12} />
                       </button>
@@ -420,7 +470,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                           <span className="truncate max-w-[60px]">{user?.username || '我'}</span>
                       </div>
                       <span className="flex items-center gap-0.5">
-                          {type === 'draft' ? <span className="text-amber-500">草稿</span> : <Heart size={10} className="text-slate-300"/>}
+                          {type === 'draft' ? <span className="text-amber-500 bg-amber-50 px-1 rounded">草稿</span> : <Heart size={10} className="text-slate-300"/>}
                       </span>
                   </div>
               </div>
@@ -433,7 +483,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
     {/* Global Full-Screen Publish Modal */}
     {publishResult && (
         <div className="fixed inset-0 z-[9999] bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-fade-in">
-            <button onClick={() => setPublishResult(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors p-2"><X size={32}/></button>
+            <button onClick={() => setPublishResult(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors p-2 active:scale-90"><X size={32}/></button>
             
             <div className="flex flex-col items-center max-w-md w-full">
                 <div className="flex items-center gap-2 mb-8">
@@ -504,10 +554,11 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
         </div>
 
         {/* Tabs */}
-        <div className="flex px-2 pt-2 bg-white border-b border-slate-100 shrink-0 z-20">
-             <button onClick={() => { setActiveTab('preview'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-xs font-bold transition-all ${activeTab === 'preview' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>预览编辑</button>
-             <button onClick={() => { setActiveTab('drafts'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-xs font-bold transition-all ${activeTab === 'drafts' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>草稿 ({drafts?.length || 0})</button>
-             <button onClick={() => { setActiveTab('published'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-xs font-bold transition-all ${activeTab === 'published' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>已发布</button>
+        <div className="flex px-1 pt-2 bg-white border-b border-slate-100 shrink-0 z-20 overflow-x-auto no-scrollbar">
+             <button onClick={() => { setActiveTab('preview'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'preview' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>预览编辑</button>
+             <button onClick={() => { setActiveTab('all'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'all' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>全部</button>
+             <button onClick={() => { setActiveTab('drafts'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'drafts' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>草稿</button>
+             <button onClick={() => { setActiveTab('published'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'published' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>已发布</button>
         </div>
 
         {/* Main Content Area */}
@@ -517,13 +568,13 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                     {/* Image Carousel (Updated) */}
                     <div className="aspect-[3/4] bg-white relative group overflow-hidden flex items-center justify-center">
                         {images.length > 0 ? (
-                            <div className="w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar">
+                            <div ref={carouselRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar scroll-smooth">
                                 {images.map((img, idx) => (
-                                    <div key={idx} className="w-full h-full shrink-0 snap-center relative flex items-center justify-center bg-white group/img">
-                                        <img src={img} className="max-w-full max-h-full object-contain pointer-events-none" /> {/* Disable direct click */}
+                                    <div key={idx} className="w-full h-full shrink-0 snap-center relative flex items-center justify-center bg-white group/img select-none">
+                                        <img src={img} className="max-w-full max-h-full object-contain pointer-events-none" /> {/* Disable pointer events on IMG to allow scroll drag on parent */}
                                         <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover/img:opacity-100 transition-opacity z-20 pointer-events-auto">
-                                             <button onClick={(e) => { e.stopPropagation(); setCroppingImg({url: img, index: idx}); }} className="p-2 bg-black/50 text-white rounded-full backdrop-blur-sm hover:bg-black/70"><Crop size={14}/></button>
-                                             <button onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter((_, i) => i !== idx)); }} className="p-2 bg-red-500/80 text-white rounded-full backdrop-blur-sm hover:bg-red-600"><Trash2 size={14}/></button>
+                                             <button onClick={(e) => { e.stopPropagation(); setCroppingImg({url: img, index: idx}); }} className="p-2 bg-black/50 text-white rounded-full backdrop-blur-sm hover:bg-black/70 active:scale-90 transition-transform"><Crop size={14}/></button>
+                                             <button onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter((_, i) => i !== idx)); }} className="p-2 bg-red-500/80 text-white rounded-full backdrop-blur-sm hover:bg-red-600 active:scale-90 transition-transform"><Trash2 size={14}/></button>
                                         </div>
                                         <div className="absolute bottom-3 right-3 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-sm font-bold">{idx + 1}/{images.length}</div>
                                     </div>
@@ -545,7 +596,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                              className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer pointer-events-none group-hover:pointer-events-auto bg-black/5"
                              onClick={() => fileInputRef.current?.click()}
                         >
-                             <div className="bg-white/90 text-slate-900 px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                             <div className="bg-white/90 text-slate-900 px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 transform translate-y-2 group-hover:translate-y-0 transition-transform active:scale-95">
                                   {images.length > 0 ? <ImageIcon size={16}/> : <Plus size={16}/>} 
                                   {images.length > 0 ? "添加/更换图片" : "点击上传封面"}
                              </div>
@@ -590,7 +641,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                 </div>
             )}
 
-            {/* Merged View for Drafts & Published with Selection Mode */}
+            {/* Flat List View for Drafts & Published */}
             {(activeTab === 'drafts' || activeTab === 'published') && (
                 <div className="p-2 pb-20">
                     {/* Items Grid */}
@@ -601,6 +652,36 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                     ) : (
                         <div className="text-center py-20 text-slate-400 text-xs">暂无{activeTab === 'drafts' ? '草稿' : '发布记录'}</div>
                     )}
+                </div>
+            )}
+
+            {/* Grouped View for "All" */}
+            {activeTab === 'all' && (
+                <div className="pb-20">
+                    {Object.keys(groupedItems).length === 0 && (
+                        <div className="text-center py-20 text-slate-400 text-xs">暂无任何记录</div>
+                    )}
+                    {Object.entries(groupedItems).map(([category, items]: [string, any[]]) => (
+                        <div key={category} className="mb-2">
+                            <div 
+                                onClick={() => toggleCategory(category)}
+                                className="sticky top-0 z-10 bg-[#F8F8F8]/95 backdrop-blur-sm px-4 py-3 flex justify-between items-center cursor-pointer border-b border-slate-100"
+                            >
+                                <div className="font-bold text-xs text-slate-600 flex items-center gap-2">
+                                    {expandedCategories.has(category) ? <FolderOpen size={14} className="text-rose-500"/> : <Folder size={14} className="text-slate-400"/>}
+                                    {category} 
+                                    <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-md text-[9px]">{items.length}</span>
+                                </div>
+                                <ChevronRight size={14} className={`text-slate-400 transition-transform ${expandedCategories.has(category) ? 'rotate-90' : ''}`} />
+                            </div>
+                            
+                            {expandedCategories.has(category) && (
+                                <div className="p-2 columns-2 gap-2 space-y-2 animate-fade-in">
+                                    {items.map(item => renderGridItem(item, item._type))}
+                                </div>
+                            )}
+                        </div>
+                    ))}
                 </div>
             )}
         </div>
@@ -614,30 +695,30 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                      </div>
                  </div>
                  <div className="flex items-center gap-2">
-                     <button onClick={() => onSaveToLibrary(content.split('\n')[0] || '未命名', content, 'note')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-full text-xs font-bold active:scale-95">存草稿</button>
-                     <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 bg-rose-500 text-white rounded-full text-xs font-bold shadow-lg shadow-rose-200 active:scale-95 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
+                     <button onClick={() => onSaveToLibrary(content.split('\n')[0] || '未命名', content, 'note')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-full text-xs font-bold active:scale-95 transition-transform hover:bg-slate-200">存草稿</button>
+                     <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 bg-rose-500 text-white rounded-full text-xs font-bold shadow-lg shadow-rose-200 active:scale-95 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-transform hover:bg-rose-600">
                          {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <ArrowRight size={14}/>} 发布
                      </button>
                  </div>
             </div>
         )}
 
-        {/* Batch Actions Bar (For Drafts & Published) */}
-        {(activeTab === 'published' || activeTab === 'drafts') && (
+        {/* Batch Actions Bar (For All List Tabs) */}
+        {activeTab !== 'preview' && (
             <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-3 px-4 z-20 shadow-lg flex items-center gap-3">
                 {isSelectionMode ? (
                     <>
-                        <button onClick={() => { setIsSelectionMode(false); setSelectedIds(new Set()); }} className="px-3 py-2 text-slate-500 text-xs font-bold bg-slate-100 rounded-lg whitespace-nowrap">取消</button>
-                        <button onClick={selectAll} className="px-3 py-2 text-blue-600 text-xs font-bold bg-blue-50 hover:bg-blue-100 rounded-lg whitespace-nowrap">全选</button>
+                        <button onClick={() => { setIsSelectionMode(false); setSelectedIds(new Set()); }} className="px-3 py-2 text-slate-500 text-xs font-bold bg-slate-100 rounded-lg whitespace-nowrap active:scale-95 transition-transform">取消</button>
+                        <button onClick={selectAll} className="px-3 py-2 text-blue-600 text-xs font-bold bg-blue-50 hover:bg-blue-100 rounded-lg whitespace-nowrap active:scale-95 transition-transform">全选</button>
                         <div className="flex-1 flex gap-2 justify-end overflow-x-auto no-scrollbar">
-                            <button onClick={handleBatchDelete} disabled={selectedIds.size === 0} className="px-3 py-2 bg-red-50 text-red-500 rounded-lg text-xs font-bold active:scale-95 disabled:opacity-50 whitespace-nowrap">删除</button>
-                            <button onClick={handleBatchPublishAction} disabled={selectedIds.size === 0} className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold active:scale-95 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap">
+                            <button onClick={handleBatchDelete} disabled={selectedIds.size === 0} className="px-3 py-2 bg-red-50 text-red-500 rounded-lg text-xs font-bold active:scale-95 disabled:opacity-50 whitespace-nowrap transition-transform hover:bg-red-100">删除</button>
+                            <button onClick={handleBatchPublishAction} disabled={selectedIds.size === 0} className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold active:scale-95 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap transition-transform hover:bg-black">
                                 <LinkIcon size={14}/> 生成链接
                             </button>
                         </div>
                     </>
                 ) : (
-                    <button onClick={() => setIsSelectionMode(true)} className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-colors">
+                    <button onClick={() => setIsSelectionMode(true)} className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-colors active:scale-95">
                         批量管理
                     </button>
                 )}

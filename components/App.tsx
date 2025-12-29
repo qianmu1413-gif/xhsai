@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole } from '../types';
 import AdminPanel from './AdminPanel';
 import Workstation from './Workstation';
+import SetupWizard from './SetupWizard'; // Import Wizard
 import { ShieldAlert, Command, ArrowRight, Sparkles, Database, Lock, Eye, EyeOff, CheckSquare, Square } from 'lucide-react';
 import { APP_NAME } from '../constants';
 import { userRepo } from '../services/repository';
@@ -12,6 +13,11 @@ const STORAGE_KEY_SESSION = 'rednote_user_session';
 const STORAGE_KEY_REMEMBER_ME = 'rednote_remember_auth';
 
 const App: React.FC = () => {
+  // Check if system is initialized (DB Key exists)
+  if (!isCloudMode) {
+      return <SetupWizard />;
+  }
+
   const [user, setUser] = useState<User | null>(null);
   
   // Admin States
@@ -166,9 +172,6 @@ const App: React.FC = () => {
 
           <div className="mt-8 text-center flex flex-col gap-4 items-center">
              <div className="flex gap-2">
-                 <div className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-400 bg-slate-100 px-3 py-1 rounded-full">
-                    <Sparkles size={10} /> 核心驱动 Gemini 3.0
-                 </div>
                  {isCloudMode && (
                      <div className="inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
                         <Database size={10} /> 云端安全存储

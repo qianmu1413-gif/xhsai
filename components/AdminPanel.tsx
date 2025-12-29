@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, SystemConfig, Project } from '../types';
-import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut } from 'lucide-react';
+import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon } from 'lucide-react';
 import { testConnection } from '../services/geminiService';
 import { userRepo, configRepo, projectRepo, getErrorMessage } from '../services/repository'; 
 import Toast, { ToastState } from './Toast';
@@ -431,7 +431,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                       <button onClick={() => setShowConfigModal(false)} className="text-slate-500 hover:text-white transition-colors"><X size={20}/></button>
                   </div>
                   
-                  <div className="p-6 space-y-6">
+                  <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh] custom-scrollbar">
                       {/* Gemini Section */}
                       <div className="space-y-4">
                           <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Sparkles size={12}/> AI 模型配置 (Gemini)</h3>
@@ -459,6 +459,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   <button onClick={checkAI} className="text-[10px] flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors">
                                       {sysStatus.loading ? <Loader2 size={12} className="animate-spin"/> : <RefreshCcw size={12}/>} 测试连接
                                   </button>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* XHS Section */}
+                      <div className="space-y-4 pt-4 border-t border-slate-800">
+                          <h3 className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-2 flex items-center gap-2"><LinkIcon size={12}/> 内容解析配置 (XHS)</h3>
+                          <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-4">
+                              <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key (XHS/V1)</label>
+                                  <input type="password" value={sysConfig.xhs.apiKey} onChange={e => updateConfig('xhs', 'apiKey', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-rose-500 transition-all placeholder:text-slate-700" placeholder="填入你的 Key" />
+                              </div>
+                              <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1.5">API URL</label>
+                                  <input type="text" value={sysConfig.xhs.apiUrl} onChange={e => updateConfig('xhs', 'apiUrl', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-rose-500 transition-all placeholder:text-slate-700" placeholder="https://..." />
                               </div>
                           </div>
                       </div>

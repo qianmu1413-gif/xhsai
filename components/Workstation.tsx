@@ -446,8 +446,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       if (newUrls.length === 0) return;
 
       setIsBatchExtracting(true);
-      // Removed overlay, just set state and show toast.
-      // UI below uses isBatchExtracting to show inline spinner.
+      showToast("正在解析链接并提取笔记，请稍候...", "info"); // Show persistent loading toast
       
       const newNotes: SocialNote[] = [];
       let failCount = 0;
@@ -715,8 +714,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                          <h3 className="font-bold text-lg mb-2">确认操作</h3>
                          <p className="text-slate-500 mb-6 text-sm">{confirmModal.msg}</p>
                          <div className="flex gap-3">
-                             <button onClick={() => setConfirmModal(null)} className="flex-1 py-2 border rounded-xl text-sm font-bold text-slate-500">取消</button>
-                             <button onClick={confirmModal.action} className="flex-1 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg">确认</button>
+                             <button onClick={() => setConfirmModal(null)} className="flex-1 py-2 border rounded-xl text-sm font-bold text-slate-500 active:scale-95 transition-transform">取消</button>
+                             <button onClick={confirmModal.action} className="flex-1 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform">确认</button>
                          </div>
                      </div>
                  </div>
@@ -825,8 +824,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                  <h3 className="font-bold text-lg mb-2">确认操作</h3>
                  <p className="text-slate-500 mb-6 text-sm leading-relaxed whitespace-pre-wrap">{confirmModal.msg}</p>
                  <div className="flex gap-3">
-                     <button onClick={() => setConfirmModal(null)} className="flex-1 py-2.5 border rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors">取消</button>
-                     <button onClick={confirmModal.action} className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg shadow-slate-200 hover:bg-black transition-colors">确认执行</button>
+                     <button onClick={() => setConfirmModal(null)} className="flex-1 py-2.5 border rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors active:scale-95">取消</button>
+                     <button onClick={confirmModal.action} className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg shadow-slate-200 hover:bg-black transition-colors active:scale-95">确认执行</button>
                  </div>
              </div>
          </div>
@@ -838,7 +837,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
               <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
                   <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                       <h3 className="font-bold text-slate-800 flex items-center gap-2"><Sparkles size={16} className="text-rose-500"/> {analysisResult.title}</h3>
-                      <button onClick={() => setAnalysisResult(null)}><X size={18} className="text-slate-400 hover:text-slate-600"/></button>
+                      <button onClick={() => setAnalysisResult(null)}><X size={18} className="text-slate-400 hover:text-slate-600 active:scale-90"/></button>
                   </div>
                   <div className="p-6 overflow-y-auto custom-scrollbar prose prose-sm prose-slate max-w-none">
                       <div className="whitespace-pre-wrap leading-relaxed">{renderFormattedText(analysisResult.content)}</div>
@@ -937,7 +936,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                              <div className="mt-2">
                                 <button 
                                     onClick={() => setShowAnalysisArea(!showAnalysisArea)} 
-                                    className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 hover:text-indigo-600 transition-colors w-full"
+                                    className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 hover:text-indigo-600 transition-colors w-full active:scale-95"
                                 >
                                     {showAnalysisArea ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
                                     已生成的资料分析 {showAnalysisArea ? '(可编辑)' : '(点击展开)'}
@@ -952,7 +951,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                                             placeholder="这里是AI对资料的分析结果。生成笔记时，系统会自动参考这里的内容。您也可以手动修改补充。"
                                         />
                                         <div className="absolute top-2 right-2 opacity-0 group-hover/analysis:opacity-100 transition-opacity flex gap-1">
-                                            <button onClick={() => { setMaterialAnalysis(''); setShowAnalysisArea(false); }} className="p-1 bg-white hover:bg-red-50 text-slate-400 hover:text-red-500 rounded shadow-sm border border-slate-100" title="清除分析"><Trash2 size={12}/></button>
+                                            <button onClick={() => { setMaterialAnalysis(''); setShowAnalysisArea(false); }} className="p-1 bg-white hover:bg-red-50 text-slate-400 hover:text-red-500 rounded shadow-sm border border-slate-100 active:scale-90" title="清除分析"><Trash2 size={12}/></button>
                                         </div>
                                         <div className="mt-2 pt-2 border-t border-indigo-100 text-[9px] text-indigo-400 flex items-center gap-1">
                                             <Sparkles size={10} className="fill-indigo-400"/> 生成笔记时将自动使用此分析作为深度背景
@@ -1045,7 +1044,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 overflow-hidden shrink-0">
                                              {p.avatar ? <img src={p.avatar} className="w-full h-full object-cover"/> : <UserIcon size={16}/>}
                                          </div>
-                                         <button onClick={() => setEditingPersona(p)} className="p-1.5 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12}/></button>
+                                         <button onClick={() => setEditingPersona(p)} className="p-1.5 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"><Edit2 size={12}/></button>
                                      </div>
                                      <div className="font-bold text-xs text-slate-800 line-clamp-1 mb-1">{p.tone}</div>
                                      <div className="text-[9px] text-slate-400 mb-2 truncate leading-tight">
@@ -1055,7 +1054,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                                          <span className="text-[9px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">
                                              创作了 {getPersonaUsageCount(p.tone)} 篇
                                          </span>
-                                         <button className="text-rose-500 hover:bg-rose-50 p-1 rounded transition-colors" onClick={() => handleApplyPersona(p)} title="应用"><Plus size={14}/></button>
+                                         <button className="text-rose-500 hover:bg-rose-50 p-1 rounded transition-colors active:scale-90" onClick={() => handleApplyPersona(p)} title="应用"><Plus size={14}/></button>
                                      </div>
                                  </div>
                              ))}
@@ -1309,8 +1308,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                   </div>
 
                   <div className="flex gap-3 pt-2">
-                      <button onClick={() => setEditingPersona(null)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors">取消</button>
-                      <button onClick={handleSaveEditedPersona} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
+                      <button onClick={() => setEditingPersona(null)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors active:scale-95">取消</button>
+                      <button onClick={handleSaveEditedPersona} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 active:scale-95">
                           <CheckCircle2 size={16}/> 保存并应用
                       </button>
                   </div>
