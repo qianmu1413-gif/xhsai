@@ -127,6 +127,7 @@ const App: React.FC = () => {
             </div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">{APP_NAME}</h1>
             <p className="text-sm text-slate-500 mt-2">专业内容创作矩阵</p>
+            <p className="text-xs text-rose-500 mt-2 bg-rose-50 px-3 py-1 rounded-full font-medium">仅限内容使用，联系suitian6</p>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">

@@ -128,17 +128,18 @@ export const userRepo = {
         const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
         
         if (rpcError) {
-             console.error("RPC Login Failed:", JSON.stringify(rpcError));
-             
              // 错误代码字典: 
              // 42883: function does not exist (函数不存在)
              // 42P13: function argument/return type mismatch (参数/返回不匹配)
              // 42804: datatype mismatch (uuid vs text) (类型不匹配)
              const schemaErrors = ['42883', '42P13', '42804'];
+             const isSchemaError = schemaErrors.includes(rpcError.code) || 
+                                   rpcError.message?.includes('structure of query does not match') ||
+                                   rpcError.details?.includes('does not match expected type');
              
              // 如果是数据库结构错误，自动降级为直接查询
-             if (schemaErrors.includes(rpcError.code) || rpcError.message?.includes('structure of query does not match')) {
-                 console.warn("Detected DB Schema Mismatch, Switching to Direct Query Fallback...");
+             if (isSchemaError) {
+                 console.warn(`RPC Interface Mismatch (${rpcError.code}), switching to direct query fallback.`);
                  
                  // 🟡 2. 降级方案: 直接查询 profiles 表
                  const { data: directData, error: directError } = await supabase
@@ -157,6 +158,7 @@ export const userRepo = {
                  }
                  rawData = directData;
              } else {
+                 console.error("RPC Login Failed:", rpcError);
                  return { user: null, error: getErrorMessage(rpcError) };
              }
         } else {
