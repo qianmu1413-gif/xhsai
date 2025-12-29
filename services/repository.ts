@@ -17,7 +17,19 @@ const safeUUID = () => {
 export const getErrorMessage = (error: any): string => {
     if (!error) return 'Unknown error';
     if (typeof error === 'string') return error;
-    return error.message || error.details || error.hint || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+    
+    // 优先返回 Supabase 的标准错误信息
+    if (error.message) return error.message;
+    if (error.error_description) return error.error_description;
+    if (error.details) return error.details;
+    if (error.hint) return error.hint;
+    
+    // 兜底：转为 JSON 字符串，避免 [object Object]
+    try {
+        return JSON.stringify(error);
+    } catch (e) {
+        return String(error);
+    }
 };
 
 // 默认配置 (敏感信息已移除，必须从数据库加载)
@@ -73,7 +85,7 @@ export const configRepo = {
 export const userRepo = {
   // 记录登录信息 (管理员不记录)
   recordLogin: async (userId: string, ip: string, location: string) => {
-      if (!supabase || userId === 'admin_user_001') return;
+      if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
           const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
           const currentData = data?.data || {};
@@ -83,7 +95,7 @@ export const userRepo = {
   },
 
   updateHeartbeat: async (userId: string, secondsToAdd: number) => {
-      if (!supabase || userId === 'admin_user_001') return;
+      if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
           const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
           const currentData = data?.data || {};
@@ -93,7 +105,7 @@ export const userRepo = {
   },
 
   incrementInteraction: async (userId: string) => {
-      if (!supabase || userId === 'admin_user_001') return;
+      if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
           const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
           const currentData = data?.data || {};
@@ -106,24 +118,51 @@ export const userRepo = {
     // 🛡️ SECURITY ENFORCED: Database Only Authentication
     if (!supabase) return { user: null, error: '系统未初始化 (Missing DB Key)' };
 
+    const cleanUsername = username.trim();
+    const cleanCode = code.trim();
+
     try {
         let rawData = null;
 
-        // 1. 优先尝试安全 RPC 登录 (Recommended)
-        // 这种方式允许我们在数据库端验证密码，而不需要让 profiles 表对公众可读
-        const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: username, _password: code });
+        // 🟢 1. 优先尝试 RPC 登录
+        const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
         
-        if (!rpcError && rpcData) {
-             // RPC 成功返回
-             // 注意：如果是单条记录，rpcData可能就是对象；如果是数组则取第一个
-             rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        if (rpcError) {
+             console.error("RPC Login Failed:", JSON.stringify(rpcError));
+             
+             // 错误代码字典: 
+             // 42883: function does not exist (函数不存在)
+             // 42P13: function argument/return type mismatch (参数/返回不匹配)
+             // 42804: datatype mismatch (uuid vs text) (类型不匹配)
+             const schemaErrors = ['42883', '42P13', '42804'];
+             
+             // 如果是数据库结构错误，自动降级为直接查询
+             if (schemaErrors.includes(rpcError.code) || rpcError.message?.includes('structure of query does not match')) {
+                 console.warn("Detected DB Schema Mismatch, Switching to Direct Query Fallback...");
+                 
+                 // 🟡 2. 降级方案: 直接查询 profiles 表
+                 const { data: directData, error: directError } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('username', cleanUsername)
+                    .eq('password', cleanCode)
+                    .maybeSingle();
+
+                 if (directError) {
+                     return { user: null, error: `登录服务异常 (Fallback): ${getErrorMessage(directError)}` };
+                 }
+                 
+                 if (!directData) {
+                     return { user: null, error: '账号或密码错误' };
+                 }
+                 rawData = directData;
+             } else {
+                 return { user: null, error: getErrorMessage(rpcError) };
+             }
         } else {
-             // 2. 降级回退 (Fallback)：直接查询表
-             // 如果用户还没在数据库创建 RPC 函数，代码也不会崩，而是走老路
-             console.warn("RPC Login skipped or failed, falling back to direct select.", rpcError?.message);
-             const { data, error } = await supabase.from('profiles').select('*').eq('username', username).eq('password', code).maybeSingle();
-             if (error) return { user: null, error: `DB Error: ${getErrorMessage(error)}` };
-             rawData = data;
+            if (rpcData) {
+                rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+            }
         }
 
         if (!rawData) return { user: null, error: '账号或密码错误' };
@@ -137,7 +176,7 @@ export const userRepo = {
                 id: rawData.id,
                 username: rawData.username,
                 role: rawData.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
-                inviteCode: 'CLOUD', 
+                inviteCode: cleanCode, // Store clean code in session
                 totalQuota: 100,
                 quotaRemaining: rawData.quota_remaining || 0,
                 expiryDate: '2099-12-31',
@@ -152,7 +191,10 @@ export const userRepo = {
             }, 
             error: null 
         };
-    } catch (e) { return { user: null, error: '登录请求失败' }; }
+    } catch (e: any) { 
+        console.error("Login Exception:", e);
+        return { user: null, error: `请求失败: ${getErrorMessage(e)}` }; 
+    }
   },
 
   listUsers: async (includeDeleted: boolean = false): Promise<User[]> => {
@@ -180,18 +222,21 @@ export const userRepo = {
 
   createUser: async (username: string, code: string): Promise<{ success: boolean; error?: string }> => {
       if (!supabase) return { success: false, error: "DB Disconnected" };
-      const { data: existing } = await supabase.from('profiles').select('id, data').eq('username', username).maybeSingle();
+      const cleanUsername = username.trim();
+      const cleanCode = code.trim();
+      
+      const { data: existing } = await supabase.from('profiles').select('id, data').eq('username', cleanUsername).maybeSingle();
       
       if (existing) {
           if (existing.data?.isDeleted) {
-               const { error } = await supabase.from('profiles').update({ password: code, data: { ...existing.data, isDeleted: false, isSuspended: false } }).eq('id', existing.id);
+               const { error } = await supabase.from('profiles').update({ password: cleanCode, data: { ...existing.data, isDeleted: false, isSuspended: false } }).eq('id', existing.id);
                return error ? { success: false, error: getErrorMessage(error) } : { success: true };
           }
           return { success: false, error: '用户名已存在' };
       }
       
       const { error } = await supabase.from('profiles').insert({ 
-          id: safeUUID(), username: username, password: code, role: 'user', quota_remaining: 100,
+          id: safeUUID(), username: cleanUsername, password: cleanCode, role: 'user', quota_remaining: 100,
           data: { isDeleted: false, isSuspended: false, interactionCount: 0, totalOnlineSeconds: 0 }
       });
       return { success: !error, error: error ? getErrorMessage(error) : undefined };
@@ -199,7 +244,7 @@ export const userRepo = {
 
   updateUserCredentials: async (userId: string, newUsername: string, newPassword: string) => {
       if (!supabase) return;
-      await supabase.from('profiles').update({ username: newUsername, password: newPassword }).eq('id', userId);
+      await supabase.from('profiles').update({ username: newUsername.trim(), password: newPassword.trim() }).eq('id', userId);
   },
 
   toggleUserSuspension: async (userId: string, suspend: boolean) => {
@@ -212,7 +257,7 @@ export const userRepo = {
   deleteUser: async (userId: string): Promise<{success: boolean, message?: string}> => {
       if (!supabase) return { success: false, message: "数据库未连接" };
       // 保护超级管理员不被删除
-      if (userId === 'admin_user_001') return { success: false, message: "无法删除超级管理员" };
+      if (userId === 'admin_user_001' || userId.startsWith('00000000')) return { success: false, message: "无法删除超级管理员" };
       try {
           const { data: current } = await supabase.from('profiles').select('data').eq('id', userId).single();
           const newData = { ...(current?.data || {}), isDeleted: true, deletedAt: Date.now() };

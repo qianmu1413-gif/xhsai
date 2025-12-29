@@ -3,21 +3,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole } from './types';
 import AdminPanel from './components/AdminPanel';
 import Workstation from './components/Workstation';
-import SetupWizard from './components/SetupWizard'; // Import Wizard
 import { ShieldAlert, Command, ArrowRight, Sparkles, Database, Lock, Eye, EyeOff, CheckSquare, Square } from 'lucide-react';
 import { APP_NAME } from './constants';
 import { userRepo } from './services/repository';
+// isCloudMode 现在总是 true，用来保持兼容性，但逻辑上不再依赖它来切换页面
 import { isCloudMode } from './services/supabase';
 
 const STORAGE_KEY_SESSION = 'rednote_user_session';
 const STORAGE_KEY_REMEMBER_ME = 'rednote_remember_auth';
 
 const App: React.FC = () => {
-  // Check if system is initialized (DB Key exists)
-  if (!isCloudMode) {
-      return <SetupWizard />;
-  }
-
   const [user, setUser] = useState<User | null>(null);
   
   // Admin States
@@ -92,7 +87,12 @@ const App: React.FC = () => {
                 localStorage.removeItem(STORAGE_KEY_REMEMBER_ME);
             }
         } else {
-            setError(loginError || '账号或密码错误');
+            // 如果是因为 Key 没填导致的错误，提示稍微不同
+            if (loginError && loginError.includes('Missing DB Key')) {
+                 setError('系统配置错误：未填写 API Key');
+            } else {
+                 setError(loginError || '账号或密码错误');
+            }
         }
     } catch (e) {
         setError('系统异常，请重试');
@@ -172,15 +172,14 @@ const App: React.FC = () => {
 
           <div className="mt-8 text-center flex flex-col gap-4 items-center">
              <div className="flex gap-2">
-                 {isCloudMode && (
-                     <div className="inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
-                        <Database size={10} /> 云端安全存储
-                     </div>
-                 )}
+                 {/* 强制显示云端标志 */}
+                 <div className="inline-flex items-center gap-1.5 text-[10px] font-medium text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
+                    <Database size={10} /> 安全连接模式
+                 </div>
              </div>
 
              <div className="text-[10px] text-slate-300 leading-relaxed max-w-[280px]">
-                 <p className="font-bold text-slate-400 mb-1 flex items-center justify-center gap-1"><Lock size={10}/> 此为内部网站，请联系suitian6</p>
+                 <p className="font-bold text-slate-400 mb-1 flex items-center justify-center gap-1"><Lock size={10}/> 系统已锁定至指定数据库</p>
              </div>
           </div>
         </div>
