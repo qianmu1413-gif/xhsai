@@ -40,9 +40,9 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'success', onClose, durat
   const Icon = Icons[type];
 
   return (
-    <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 px-5 py-3 rounded-full shadow-2xl animate-fade-in ${styles[type]} min-w-[200px] max-w-[90vw] justify-center backdrop-blur-md`}>
-      <Icon size={18} className="shrink-0" />
-      <span className="text-sm font-bold truncate">{message}</span>
+    <div className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] flex flex-col items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl animate-fade-in ${styles[type]} min-w-[200px] max-w-[80vw] justify-center backdrop-blur-md text-center`}>
+      <Icon size={28} className="shrink-0 opacity-90" />
+      <span className="text-sm font-bold leading-relaxed">{message}</span>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Database, ShieldCheck, ArrowRight, Loader2, Server, Lock } from 'lucide-react';
+import { Database, ShieldCheck, ArrowRight, Loader2, Server, Lock, Code2 } from 'lucide-react';
 import { setupSystemConnection } from '../services/supabase';
 
 const SetupWizard: React.FC = () => {
@@ -75,6 +75,16 @@ const SetupWizard: React.FC = () => {
                         {loading ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
                         建立安全连接
                     </button>
+                    
+                    <div className="pt-4 border-t border-white/5 text-center">
+                         <div className="text-[10px] text-slate-500 mb-1">
+                             <Code2 size={10} className="inline mr-1"/>
+                             开发者提示
+                         </div>
+                         <p className="text-[10px] text-slate-600">
+                             若要免去所有用户的配置步骤，请在 <span className="text-slate-400 font-mono">services/supabase.ts</span> 中填入 <span className="text-indigo-400">HARDCODED_KEY</span>。
+                         </p>
+                    </div>
                 </div>
             </div>
         </div>

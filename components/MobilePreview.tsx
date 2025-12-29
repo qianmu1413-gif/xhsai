@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Battery, Signal, Wifi, ChevronLeft, Image as ImageIcon, X, ChevronRight, Check, Plus, Trash2, Save, LayoutTemplate, Archive, Loader2, QrCode, CheckCircle, Download, Share2, Heart, MessageCircle, Star, MoreHorizontal, MapPin, Settings2, GripHorizontal, ArrowLeft, Crop, Maximize2, AlertCircle, Move, ZoomIn, ArrowRight, CheckSquare, Square, Link as LinkIcon, Folder, FolderOpen, Filter, MousePointerClick } from 'lucide-react';
 import { publishToXHS } from '../services/publishService';
@@ -220,6 +219,22 @@ const InteractiveCropper = ({ imgUrl, onCancel, onSave }: { imgUrl: string, onCa
     );
 };
 
+const QRCodeDisplay = ({ value, size }: { value: string, size: number }) => {
+    // Check if the value is likely an image (Data URI or URL with image extension)
+    // If it's a base64 image or a direct image link, display it directly.
+    // Otherwise, generate a QR code from the value string using api.qrserver.com
+    if (value.startsWith('data:image') || (value.startsWith('http') && /\.(png|jpg|jpeg|gif|webp)$/i.test(value))) {
+        return <img src={value} alt="QR Code" style={{ width: size, height: size, objectFit: 'contain' }} />;
+    }
+    return (
+        <img 
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(value)}`}
+            alt="QR Code"
+            style={{ width: size, height: size, objectFit: 'contain' }}
+        />
+    );
+};
+
 const MobilePreview: React.FC<MobilePreviewProps> = ({
   content, onContentChange, onCopy, targetWordCount = 400, onSaveToLibrary,
   drafts = [], onSelectDraft, onDeleteDraft,
@@ -234,6 +249,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const [croppingImg, setCroppingImg] = useState<{ url: string, index: number } | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isUploading, setIsUploading] = useState(false);
   
   // Categorization State for "All" Tab
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['Drafts', 'Published']));
@@ -241,23 +257,26 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const carouselRef = useRef<HTMLDivElement>(null);
 
-  // --- CAROUSEL DRAG LOGIC ---
+  // --- CAROUSEL DRAG LOGIC (Enhanced) ---
   const [isDragScroll, setIsDragScroll] = useState(false);
-  const [dragStartX, setDragStartX] = useState(0);
+  const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
 
-  const handleDragStart = (e: React.MouseEvent) => {
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
       if (!carouselRef.current) return;
       setIsDragScroll(true);
-      setDragStartX(e.pageX - carouselRef.current.offsetLeft);
+      const pageX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+      setStartX(pageX - carouselRef.current.offsetLeft);
       setScrollLeft(carouselRef.current.scrollLeft);
   };
 
-  const handleDragMove = (e: React.MouseEvent) => {
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDragScroll || !carouselRef.current) return;
-      e.preventDefault();
-      const x = e.pageX - carouselRef.current.offsetLeft;
-      const walk = (x - dragStartX) * 1.5; // Scroll speed multiplier
+      // Prevent default to avoid selection during drag
+      // e.preventDefault(); 
+      const pageX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+      const x = pageX - carouselRef.current.offsetLeft;
+      const walk = (x - startX) * 1.5; // Scroll speed multiplier
       carouselRef.current.scrollLeft = scrollLeft - walk;
   };
 
@@ -349,13 +368,18 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files.length > 0 && onFileUpload) {
-           // Feedback for user immediately
-           showToast("图片正在上传中，请稍后...", "info");
-           const files = Array.from(e.target.files);
-           const newUrls = await onFileUpload(files);
-           if (newUrls && newUrls.length > 0) {
-               onImagesChange([...images, ...newUrls]);
-               showToast("上传成功");
+           setIsUploading(true); // Start loading state
+           try {
+               const files = Array.from(e.target.files);
+               const newUrls = await onFileUpload(files);
+               if (newUrls && newUrls.length > 0) {
+                   onImagesChange([...images, ...newUrls]);
+                   showToast("上传成功");
+               }
+           } catch (error) {
+               showToast("上传失败，请重试", "error");
+           } finally {
+               setIsUploading(false); // End loading state
            }
       }
       // Reset input
@@ -382,7 +406,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
           const item: any = allItems.find((i: any) => i.id === id);
           if (item) {
               const itemTitle = item.title;
-              const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(itemTitle)];
+              const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(item.id)];
               itemsToPublish.push({
                   title: itemTitle,
                   content: 'content' in item ? item.content : itemTitle,
@@ -442,7 +466,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       // but for this app structure, publishedHistory records are simple.
       // If content is missing, we use title.
       const itemContent = 'content' in item ? item.content : itemTitle; 
-      const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(itemTitle)];
+      const itemImages = 'imageUrls' in item ? item.imageUrls : [getRandomImage(item.id)];
       
       onContentChange(itemContent);
       onImagesChange(itemImages);
@@ -462,7 +486,8 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   // Render Grid Item (Common for Drafts and Published)
   const renderGridItem = (item: any, type: 'draft' | 'published') => {
       const isSelected = selectedIds.has(item.id);
-      const cover = type === 'published' ? item.coverImage : getRandomImage(item.title || 'draft');
+      // Use item.id to generate random placeholder to ensure variety even with same title
+      const cover = type === 'published' ? item.coverImage : getRandomImage(item.id);
       
       return (
           <div 
@@ -485,7 +510,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                             if (type === 'draft' && onDeleteDraft) onDeleteDraft(item.id);
                             if (type === 'published' && onDeletePublished) onDeletePublished(item.id);
                         }}
-                        className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all backdrop-blur-sm z-10 active:scale-75"
+                        className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all backdrop-blur-sm z-10 active:scale-75"
                       >
                           <Trash2 size={12} />
                       </button>
@@ -608,15 +633,18 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                         {images.length > 0 ? (
                             <div 
                                 ref={carouselRef}
-                                className="w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar cursor-grab active:cursor-grabbing"
+                                className={`w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar ${isDragScroll ? 'cursor-grabbing' : 'cursor-grab'}`}
                                 onMouseDown={handleDragStart}
                                 onMouseMove={handleDragMove}
                                 onMouseUp={handleDragEnd}
                                 onMouseLeave={handleDragEnd}
+                                onTouchStart={handleDragStart}
+                                onTouchMove={handleDragMove}
+                                onTouchEnd={handleDragEnd}
                             >
                                 {images.map((img, idx) => (
                                     <div key={idx} className="w-full h-full shrink-0 snap-center relative flex items-center justify-center bg-white group/img select-none">
-                                        <img src={img} className="max-w-full max-h-full object-contain pointer-events-none" /> 
+                                        <img src={img} className="max-w-full max-h-full object-contain pointer-events-none select-none" draggable={false} /> 
                                         <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover/img:opacity-100 transition-opacity z-20 pointer-events-auto">
                                              <button onClick={(e) => { e.stopPropagation(); setCroppingImg({url: img, index: idx}); }} className="p-2 bg-black/50 text-white rounded-full backdrop-blur-sm hover:bg-black/70 active:scale-90 transition-transform"><Crop size={14}/></button>
                                              <button onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter((_, i) => i !== idx)); }} className="p-2 bg-red-500/80 text-white rounded-full backdrop-blur-sm hover:bg-red-600 active:scale-90 transition-transform"><Trash2 size={14}/></button>
@@ -633,19 +661,29 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                 </div>
                             </div>
                         )}
+
+                        {/* Upload Loading Overlay */}
+                        {isUploading && (
+                             <div className="absolute inset-0 z-30 bg-black/60 flex flex-col items-center justify-center text-white backdrop-blur-sm animate-fade-in">
+                                  <Loader2 size={32} className="animate-spin mb-2 text-rose-500" />
+                                  <span className="text-xs font-bold">图片正在上传中，请稍后...</span>
+                             </div>
+                        )}
                         
                         <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
                         
-                        {/* Hover Overlay for Upload - Only clickable/visible on hover */}
-                        <div 
-                             className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer pointer-events-none group-hover:pointer-events-auto bg-black/5"
-                             onClick={() => fileInputRef.current?.click()}
-                        >
-                             <div className="bg-white/90 text-slate-900 px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 transform translate-y-2 group-hover:translate-y-0 transition-transform active:scale-95">
-                                  {images.length > 0 ? <ImageIcon size={16}/> : <Plus size={16}/>} 
-                                  {images.length > 0 ? "添加/更换图片" : "点击上传封面"}
-                             </div>
-                        </div>
+                        {/* Hover Overlay for Upload - Only clickable/visible on hover and not uploading */}
+                        {!isUploading && (
+                            <div 
+                                 className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer pointer-events-none group-hover:pointer-events-auto bg-black/5"
+                                 onClick={() => fileInputRef.current?.click()}
+                            >
+                                 <div className="bg-white/90 text-slate-900 px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 transform translate-y-2 group-hover:translate-y-0 transition-transform active:scale-95">
+                                      {images.length > 0 ? <ImageIcon size={16}/> : <Plus size={16}/>} 
+                                      {images.length > 0 ? "添加/更换图片" : "点击上传封面"}
+                                 </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Content Body */}
@@ -772,14 +810,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
     </div>
     </>
   );
-};
-
-const QRCodeDisplay = ({ value, size }: { value: string, size: number }) => {
-    return (
-        <div style={{ width: size, height: size, background: '#f0f0f0' }} className="flex items-center justify-center">
-             <img src={value} className="w-full h-full object-contain" alt="QR Code" />
-        </div>
-    );
 };
 
 export default MobilePreview;
