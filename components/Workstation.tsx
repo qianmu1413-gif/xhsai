@@ -1,5 +1,5 @@
 
-// ... imports (keep existing)
+// ... (imports remain the same)
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { PersonaAnalysis, FidelityMode, ChatMessage, Project, NoteDraft, User, BulkNote, AttachedFile, SocialNote, PublishedRecord, PreviewState } from '../types';
 import { streamExpertGeneration, streamPersonaAnalysis, analyzeMaterials } from '../services/geminiService';
@@ -135,10 +135,12 @@ const renderFormattedText = (text: string) => {
   );
 };
 
-// ... (keep SyncStatus, CopyButton unchanged)
-const SyncStatus: React.FC<{ status: 'saved' | 'saving' | 'error' }> = ({ status }) => {
+// 🟢 优化：SyncStatus 现在支持“未保存”状态
+const SyncStatus: React.FC<{ status: 'saved' | 'saving' | 'error', hasUnsavedChanges: boolean }> = ({ status, hasUnsavedChanges }) => {
     if (status === 'saving') return <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-full"><Loader2 size={10} className="animate-spin" /> 云同步中...</div>;
     if (status === 'error') return <div className="flex items-center gap-1.5 text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-1 rounded-full"><AlertCircle size={10} /> 同步失败</div>;
+    // 🟠 新增：未保存状态提示
+    if (hasUnsavedChanges) return <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full animate-pulse"><Edit2 size={10} /> 未保存</div>;
     return <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full"><CheckCircle2 size={10} /> 已保存</div>;
 };
 
@@ -156,7 +158,7 @@ const CopyButton: React.FC<{ text: string }> = ({ text }) => {
     );
 };
 
-// 🟢 升级版字符计算：先清洗Markdown再统计，更准确
+// ... (Rest of ChatMessageItem and getLength remain unchanged)
 const getLength = (str: string) => {
   if (!str) return 0;
   const cleanStr = cleanMarkdown(str);
@@ -277,7 +279,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   const isResizingRef = useRef(false);
 
-  // ... (keep all state and effects exactly as they were until JSX)
+  // ... (keep all logic until render)
+  // ... (omitted mostly unchanged logic for brevity, just ensure imports and state are aligned)
   const [batchLinkInput, setBatchLinkInput] = useState('');
   const [isBatchExtracting, setIsBatchExtracting] = useState(false);
   const [isMaterialSelectionMode, setIsMaterialSelectionMode] = useState(false);
@@ -312,7 +315,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // ... (useEffect for resize remains same)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
@@ -334,7 +336,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
     };
   }, []);
 
-  // 🔴 核心功能：处理未保存的导航跳转
   const handleNavigationAttempt = (action: () => void) => {
       if (hasUnsavedChanges) {
           setUnsavedNavModal({ show: true, action });
@@ -343,7 +344,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       }
   };
 
-  // ... (handleMobileItemSelect, handleCreateNewDraft remain same)
   const handleMobileItemSelect = (id: string) => {
       handleNavigationAttempt(() => {
           // Find item in drafts or published
@@ -375,7 +375,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       });
   };
 
-  // ... (internalSaveToLibrary, saveAndNavigate, discardAndNavigate remain same)
   const internalSaveToLibrary = async (t: string, c: string, type: 'prompt' | 'note', existingId?: string, folder?: string) => {
       // 1. 内容校验
       if (!c.trim() && !t.trim()) {
@@ -478,7 +477,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       }
   };
 
-  // ... (savePublishedRecord, deletePublishedRecord etc. remain same)
   const savePublishedRecord = (record: PublishedRecord) => {
       setPublishedHistory(prev => {
           const exists = prev.some(p => p.id === record.id);
@@ -610,7 +608,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       finally { setIsAnalysingFile(false); }
   };
 
-  // ... (useEffects for loading projects etc. remain same)
   useEffect(() => { handleInputResize(); }, [currentInput]);
   useEffect(() => {
     const loadProjects = async () => {
@@ -684,7 +681,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
 
-  // ... (handleBatchDeleteDrafts, handleBatchExtractInternal, toggleMaterialSelection etc. remain same)
   const handleBatchDeleteDrafts = (ids: string[]) => {
       const idSet = new Set(ids.map(String));
       setDrafts(prev => prev.filter(d => !idSet.has(String(d.id))));
@@ -817,27 +813,22 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   };
 
   const adoptNote = useCallback((note: BulkNote) => {
-      // 🟢 核心：采纳时直接清洗 Markdown，移除所有 * 号和标题符号，确保填入编辑器的是纯净文本
       const cleanTitle = cleanMarkdown(note.title);
       const cleanContent = cleanMarkdown(note.content);
       const full = `${cleanTitle}\n\n${cleanContent}`;
       
-      // 1. Load CLEAN content directly into editor state
       setGeneratedContent(full);
       setPreviewState(prev => ({ ...prev, title: cleanTitle }));
       
-      // 2. Set Active Item to NULL to signify "Unsaved New Note"
       setActiveItemId(null);
       setHasUnsavedChanges(true); // Mark as dirty
 
-      // 3. Auto-expand preview panel if collapsed (Desktop) or Switch Tab (Mobile)
       setIsPreviewCollapsed(false);
       if (window.innerWidth < 1024) setActiveTab('preview');
       
       showToast("已填入编辑器 (自动清洗格式)");
   }, []);
 
-  // 🔴 核心修复：将生成逻辑拆分，增加未保存内容的检查
   const executeGenerate = async () => {
       if (isGenerating) return;
       if (!currentInput.trim() && !contextText.trim() && attachedFiles.length === 0) return;
@@ -862,8 +853,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
         );
         setChatHistory(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, text: result.dialogueText, thought: result.thought, bulkNotes: result.notes, isStreaming: false } : msg));
         
-        // Auto-adopt the first note if available and bulk count is 1
-        // 🔴 注意：这里会自动覆盖编辑器内容，所以必须前置检查 hasUnsavedChanges
         if (result.notes && result.notes.length > 0 && bulkCount === 1) {
             adoptNote(result.notes[0]);
         }
@@ -876,8 +865,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   };
 
   const handleGenerateClick = () => {
-      // 🟢 如果编辑器有未保存的内容，且即将进行的生成操作（只生成1篇时）会自动覆盖编辑器
-      // 那么必须拦截并警告用户
       if (hasUnsavedChanges && bulkCount === 1) {
           setUnsavedNavModal({ 
               show: true, 
@@ -907,7 +894,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       }
   };
 
-  // ... (createNewProject, getPersonaUsageCount remain same)
   const createNewProject = async (name: string) => {
       const cleanName = name.trim();
       if (!cleanName) return;
@@ -947,7 +933,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   };
 
   if (viewMode === 'dashboard') {
-     // ... (Return existing dashboard JSX)
+     // ... (Dashboard JSX remains the same)
      return (
         <div className="h-screen bg-[#F0F2F5] flex flex-col relative font-sans text-slate-800 overflow-hidden">
              {/* ... */}
@@ -1062,6 +1048,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
              <button onClick={() => handleNavigationAttempt(() => setCurrentProjectId(null))} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors mr-3 active:scale-90"><ArrowLeft size={16} /></button>
              <span className="font-bold text-sm truncate flex-1 text-slate-800">{projects.find(p => p.id === currentProjectId)?.name}</span>
          </div>
+         {/* ... (rest of sidebar) */}
          <div className="flex bg-white border-b border-slate-200 px-2 pt-2">
              {['design', 'assets', 'history'].map(t => (
                  <button key={t} onClick={() => setActiveLeftTab(t as any)} className={`flex-1 pb-2 text-[11px] font-bold border-b-2 transition-all active:opacity-70 ${activeLeftTab === t ? 'border-rose-500 text-rose-600' : 'border-transparent text-slate-400'}`}>
@@ -1109,8 +1096,9 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                              <button onClick={() => { const curr = projects.find(p => p.id === currentProjectId)?.persona; if(curr) setEditingPersona(curr); }} className="p-3 h-full bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors active:scale-95"><Pencil size={16} /></button>
                          </div>
                      </section>
-                     
+                     {/* ... (rest of sections omitted for brevity but remain identical) ... */}
                      <section className="space-y-3 z-10 relative">
+                         {/* ... */}
                          <div className="flex justify-between items-center">
                             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><FileText size={12}/> 核心背景</h3>
                             <div className="flex gap-1">
@@ -1170,6 +1158,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                      </section>
                      {/* ... (rest of sidebar) */}
                      <section className="space-y-3 pt-2 border-t border-slate-100">
+                         {/* ... */}
                          <div className="flex justify-between items-center">
                             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><LinkIcon size={12}/> 素材库 ({socialNotes.length})</h3>
                             <div className="flex gap-1">
@@ -1306,12 +1295,14 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           <div className="h-14 border-b border-slate-100 flex items-center justify-between px-6 bg-white sticky top-0 z-10">
               <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div><span className="text-sm font-bold text-slate-900">AI 创作助手</span></div>
               <div className="flex items-center gap-4">
-                 <SyncStatus status={syncStatus} />
+                 {/* 🟢 传入 hasUnsavedChanges 状态 */}
+                 <SyncStatus status={syncStatus} hasUnsavedChanges={hasUnsavedChanges} />
                  <div className="h-4 w-[1px] bg-slate-200 mx-2"></div>
                  <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded text-[10px] font-bold text-slate-500"><Zap size={10} fill="currentColor" className="text-yellow-500" />{user.quotaRemaining}</div>
                  <button onClick={() => setIsPreviewCollapsed(!isPreviewCollapsed)} className="hidden lg:block text-slate-400 hover:text-slate-800 active:scale-95 transition-transform">{isPreviewCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}</button>
               </div>
           </div>
+          {/* ... (Rest of chat logic remains same) */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-6 lg:px-16 space-y-10 scroll-smooth pb-40">
               {chatHistory.length === 0 && <div className="h-full flex flex-col items-center justify-center pb-20 opacity-50"><div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mb-6"><Sparkles size={32} className="text-slate-300" /></div><h3 className="text-sm font-medium text-slate-400">准备好创作爆款了吗？</h3></div>}
               {chatHistory.map((msg) => ( <ChatMessageItem key={msg.id} msg={msg} onAdopt={adoptNote} /> ))}
@@ -1344,6 +1335,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
       {!isPreviewCollapsed && (
           <div style={{ width: window.innerWidth >= 1024 ? rightPanelWidth : '100%' }} className={`flex-col bg-[#F8FAFC] z-20 transition-all border-l border-slate-200 relative ${activeTab === 'preview' ? 'flex w-full absolute inset-0' : 'hidden'} lg:flex lg:shrink-0 lg:static`}>
+              {/* ... (MobilePreview container) */}
               <div className="hidden lg:block absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-rose-500/50 z-50 transition-colors" onMouseDown={() => { isResizingRef.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }}></div>
               <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 shrink-0 bg-[#F8FAFC]">
                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">效果预览</span>
@@ -1375,6 +1367,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       )}
 
       {selectedSocialNote && (
+          // ... (Rest of JSX omitted)
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedSocialNote(null)}>
                <div className="w-full max-w-5xl h-[85vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden" onClick={e => e.stopPropagation()}>
                     <button onClick={() => setSelectedSocialNote(null)} className="absolute top-4 left-4 p-2 bg-black/50 text-white rounded-full z-50 active:scale-90"><X size={20}/></button>
@@ -1393,6 +1386,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       )}
 
       {editingPersona && (
+          // ... (Rest of Editing Modal JSX)
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[250] flex items-center justify-center p-6 animate-fade-in" onClick={() => setEditingPersona(null)}>
               <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
                   <h3 className="font-bold text-lg flex items-center gap-2 text-slate-800"><Settings2 size={20}/> 编辑人设</h3>
@@ -1426,8 +1420,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       {qrModalRecord && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in" onClick={() => setQrModalRecord(null)}>
               <div className="relative w-full max-w-[320px] rounded-[24px] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-                  
-                  {/* The Card - Matching High-End Style */}
+                  {/* (Modal content matches original) */}
                   <div className="relative aspect-[3/4] w-full">
                        {/* Full Cover Background */}
                        <img src={qrModalRecord.coverImage || qrModalRecord.imageUrls?.[0]} className="absolute inset-0 w-full h-full object-cover" />

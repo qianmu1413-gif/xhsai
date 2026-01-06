@@ -203,6 +203,8 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const imageScrollRef = useRef<HTMLDivElement>(null);
   const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // 新增：正文 Ref
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const safeContent = content || '';
@@ -275,6 +277,13 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       }
   };
 
+  const scrollToImage = (index: number) => {
+      if (imageScrollRef.current) {
+          const width = imageScrollRef.current.offsetWidth;
+          imageScrollRef.current.scrollTo({ left: width * index, behavior: 'smooth' });
+      }
+  };
+
   const handleUploadWrapper = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files.length > 0 && onFileUpload) {
           setIsImageUploading(true);
@@ -324,6 +333,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       }
   };
 
+  // ... (handleBatchDelete, handleBatchArchive etc. remain unchanged)
   const handleBatchDelete = () => {
       const ids: string[] = Array.from(selectedIds) as string[];
       if (ids.length === 0) return;
@@ -463,7 +473,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       if (!title.trim()) return showToast("请填写标题", 'error');
       
       // 🟢 核心修改：发布时不先自动存草稿，防止产生重复草稿记录
-      // onSaveToLibrary(...) REMOVED
       
       setIsPublishing(true);
       
@@ -487,7 +496,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
           onSavePublished?.(finalRecord);
           
           // 🟢 核心修改：如果是从草稿发布的，发布成功后直接删除原草稿
-          // Determine if active item is currently a draft
           const isDraft = drafts.some(d => String(d.id) === String(activeItemId));
           if (activeItemId && isDraft && onDeleteDraft) {
               onDeleteDraft(activeItemId);
@@ -567,7 +575,13 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                         <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleUploadWrapper} />
                         {safeImages.length > 1 && (
                             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-                                {safeImages.map((_, i) => <div key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i === currentImageIndex ? 'bg-[#ff2442]' : 'bg-white/50'}`}/>)}
+                                {safeImages.map((_, i) => (
+                                    <button 
+                                        key={i} 
+                                        onClick={() => scrollToImage(i)}
+                                        className={`w-1.5 h-1.5 rounded-full transition-all ${i === currentImageIndex ? 'bg-[#ff2442] scale-125' : 'bg-white/50 hover:bg-white'}`}
+                                    />
+                                ))}
                             </div>
                         )}
                         <div className="absolute top-3 right-3 bg-black/30 backdrop-blur px-2 py-0.5 rounded-full text-[10px] text-white font-medium opacity-80">{currentImageIndex + 1}/{safeImages.length}</div>
@@ -580,6 +594,12 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                             <textarea
                                 ref={titleTextareaRef}
                                 value={title}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        bodyTextareaRef.current?.focus();
+                                    }
+                                }}
                                 onChange={(e) => {
                                     // 模拟单行输入习惯，回车即换行到正文
                                     const newTitle = e.target.value.replace(/\n/g, ' '); 
@@ -592,7 +612,13 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                             <div className={`absolute right-0 top-1.5 text-[10px] font-mono ${titleCount > 20 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{titleCount}/20</div>
                         </div>
                         <div className="relative">
-                            <textarea value={fullBody} onChange={(e) => onContentChange(`${title}\n${e.target.value}`)} className="w-full text-[14px] leading-relaxed text-[#333] border-none outline-none resize-none bg-transparent placeholder:text-slate-300 min-h-[400px]" placeholder="添加正文" />
+                            <textarea 
+                                ref={bodyTextareaRef}
+                                value={fullBody} 
+                                onChange={(e) => onContentChange(`${title}\n${e.target.value}`)} 
+                                className="w-full text-[14px] leading-relaxed text-[#333] border-none outline-none resize-none bg-transparent placeholder:text-slate-300 min-h-[400px]" 
+                                placeholder="添加正文" 
+                            />
                             <div className={`text-right text-[10px] font-mono mt-1 ${bodyCount > 1000 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{bodyCount}/1000</div>
                         </div>
                         <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-50">
@@ -673,7 +699,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             )}
         </div>
 
-        {/* Floating Actions & Toolbars */}
+        {/* ... (Toolbars logic mostly unchanged) ... */}
         {activeTab === 'preview' && (
             <div className="absolute bottom-0 left-0 right-0 h-[52px] bg-white border-t border-slate-100 flex items-center px-4 justify-between z-50">
                 <div className="flex-1 bg-slate-100 h-9 rounded-full px-4 flex items-center text-slate-400 text-xs mr-4"><span className="truncate">说点什么...</span></div>
@@ -685,6 +711,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             </div>
         )}
 
+        {/* ... (Rest of modal logic) ... */}
         {activeTab === 'preview' && !activePublishedRecord && (
             <div className="absolute bottom-[65px] right-4 flex flex-col gap-3 z-50 items-end animate-fade-in">
                 <button onClick={handlePublish} disabled={isPublishing} className="h-9 px-4 bg-[#ff2442] text-white rounded-full shadow-lg flex items-center justify-center gap-1.5 active:scale-90 transition-transform disabled:opacity-50 font-bold text-xs shadow-rose-200/50">
@@ -693,7 +720,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             </div>
         )}
 
-        {/* ... (rest of the component logic for SelectionMode, Tabs, etc. remains unchanged) ... */}
         {isSelectionMode && activeTab !== 'preview' && (
             <div className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-slate-100 z-50 animate-fade-in pb-6 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
                 <div className="flex gap-2">
