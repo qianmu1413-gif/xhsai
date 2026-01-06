@@ -2,21 +2,27 @@
 import { FidelityMode, PersonaAnalysis, BulkNote, AttachedFile } from "../types";
 import { configRepo } from "./repository";
 import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
-import mammoth from "mammoth"; // Correctly import mammoth from the module map
+import mammoth from "mammoth";
+import { GoogleGenAI, Type } from "@google/genai";
 
 // 协议分隔符
 const DATA_MARKER = "###MATRIX_DATA_START###";
-const THOUGHT_START = "[[THOUGHT]]";
-const THOUGHT_END = "[[/THOUGHT]]";
 
-const cleanMarkdown = (text: string): string => {
+// --- 文本清洗工具 (缓冲区清洗) ---
+const cleanText = (text: string | undefined): string => {
     if (!text) return "";
-    return text
-        .replace(/\*\*/g, "")
-        .replace(/\*/g, "")
-        .replace(/`/g, "")
-        .replace(/^#+\s*/gm, "")
-        .trim();
+    let cleaned = text;
+
+    cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
+    cleaned = cleaned.replace(/\[\[THOUGHT\]\][\s\S]*?\[\[\/THOUGHT\]\]/gi, "");
+    cleaned = cleaned.replace(/^(Here is (the|a)|Sure, here is|Okay, here is|Based on the content).*?:/gmi, "");
+    
+    cleaned = cleaned.replace(/\*\*Persona\*\*:/gi, "**人设定位**:");
+    cleaned = cleaned.replace(/\*\*Topic\*\*:/gi, "**主题分析**:");
+    cleaned = cleaned.replace(/\*\*Target Audience\*\*:/gi, "**目标人群**:");
+    cleaned = cleaned.replace(/\*\*Key Data\*\*:/gi, "**核心数据**:");
+
+    return cleaned.trim();
 };
 
 const extractAndParseJSON = (text: string): any => {
@@ -24,475 +30,418 @@ const extractAndParseJSON = (text: string): any => {
     let json: any = null;
     try { json = JSON.parse(text); } catch (e) {}
     if (!json) {
-        let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-        try { json = JSON.parse(cleanText); } catch (e) {}
+        let cleanTextStr = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        try { json = JSON.parse(cleanTextStr); } catch (e) {}
     }
     if (!json) {
         const match = text.match(/\{[\s\S]*\}/);
-        if (match) {
-            try { json = JSON.parse(match[0]); } catch (e) {}
-        }
-    }
-    if (json) {
-        if (json.tone) json.tone = cleanMarkdown(json.tone);
-        if (json.structure) json.structure = cleanMarkdown(json.structure);
-        if (json.emojiDensity) json.emojiDensity = cleanMarkdown(json.emojiDensity);
+        if (match) { try { json = JSON.parse(match[0]); } catch (e) {} }
     }
     return json;
 };
 
-// --- FILE PROCESSING HELPERS ---
+// --- 文件处理辅助 ---
 
-const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
-    try {
-        // 1. Try direct fetch
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Direct fetch failed: ${response.statusText}`);
-        return await response.blob();
-    } catch (e: any) {
-        // 2. Fallback to CORS proxy if direct fetch fails (common with COS/S3)
-        console.warn("Direct fetch failed, trying proxy...", e);
-        try {
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-            const response = await fetch(proxyUrl);
-            if (!response.ok) throw new Error(`Proxy fetch failed: ${response.statusText}`);
-            return await response.blob();
-        } catch (proxyErr: any) {
-            console.error("Fetch Blob Error:", proxyErr);
-            throw new Error(`无法读取文件内容 (CORS/Network): ${url}`);
+// 🛡️ Safe ArrayBuffer extraction (Compatible with old browsers & non-standard Blobs)
+const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
+    return new Promise((resolve, reject) => {
+        if (!(blob instanceof Blob)) {
+            return reject(new Error("Input is not a Blob"));
         }
-    }
+        // Prefer standard method if available and robust
+        if (typeof blob.arrayBuffer === 'function') {
+            blob.arrayBuffer().then(resolve).catch(() => {
+                // Fallback to FileReader if arrayBuffer() fails (e.g. some polyfills)
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as ArrayBuffer);
+                reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
+                reader.readAsArrayBuffer(blob);
+            });
+        } else {
+            // Fallback for older environments
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
+            reader.readAsArrayBuffer(blob);
+        }
+    });
 };
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
+        // 安全检查
+        if (!blob || !(blob instanceof Blob)) {
+             return reject(new Error("File blob is empty or invalid type"));
+        }
         const reader = new FileReader();
-        reader.onloadend = () => {
-            const res = reader.result as string;
-            // Remove Data URI prefix (e.g. "data:application/pdf;base64,")
-            const base64 = res.split(',')[1];
-            resolve(base64);
+        reader.onload = () => {
+             const result = reader.result as string;
+             // 兼容不同浏览器返回格式，确保只取 base64 部分
+             const base64 = result.includes(',') ? result.split(',')[1] : result;
+             resolve(base64);
         };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
+        reader.onerror = (e) => reject(new Error(`FileReader Failed: ${reader.error?.message}`));
+        try {
+            reader.readAsDataURL(blob);
+        } catch (e: any) {
+            reject(new Error(`readAsDataURL Exec Failed: ${e.message}`));
+        }
     });
 };
 
-const extractDocxText = async (blob: Blob): Promise<string> => {
-    const arrayBuffer = await blob.arrayBuffer();
-    if (mammoth) {
-        try {
-            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-            return result.value;
-        } catch (e) {
-            console.error("Mammoth Extract Error", e);
-            return "[Error extracting text from DOCX - File might be corrupted]";
+const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
+    // 🛡️ 核心修复：添加时间戳，强制浏览器忽略缓存，解决“刷新后CORS报错”的问题
+    const cleanUrl = url.split('?')[0]; 
+    const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
+
+    // 1. 尝试直连 (带时间戳)
+    try {
+        const response = await fetch(timestampUrl, { 
+            cache: 'no-store', 
+            mode: 'cors',
+            credentials: 'omit'  // 不发送 Cookie，防止身份验证导致的 CORS 失败
+        }); 
+        if (response.ok) return await response.blob();
+        if (response.status === 403) throw new Error("403 Forbidden");
+    } catch (e: any) { 
+        if (e.message.includes('403')) {
+            throw new Error("403 权限拒绝: 请检查腾讯云 COS 的【防盗链】是否设置了允许空 Referer");
         }
     }
-    return "[System: Document parser not loaded. Please refresh]";
+
+    // 2. 尝试代理 1 (corsproxy.io) - 专门解决 CORS 问题
+    try {
+        // 代理也加上原始 URL，不加时间戳防止破坏签名(如果是私有桶)
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        if (res.ok) return await res.blob();
+    } catch (e) {
+        // console.warn("Proxy 1 failed...", e);
+    }
+
+    // 3. 尝试代理 2 (allorigins.win) - 备用线路
+    try {
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        if (res.ok) return await res.blob();
+    } catch (e) {
+        // console.warn("Proxy 2 failed...", e);
+    }
+
+    throw new Error("无法从云端下载文件 (可能原因: 防盗链拦截、CORS配置未生效或浏览器缓存锁死)");
+};
+
+const extractDocxText = async (blob: Blob): Promise<string> => {
+    try {
+        const arrayBuffer = await blobToArrayBuffer(blob);
+        if (mammoth) {
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            return result.value;
+        }
+    } catch (e) { return "[DOCX 解析失败]"; }
+    return "[解析器未就绪]";
+};
+
+// 🟢 PDF 解析工具 (依赖 index.html 中的 pdf.js)
+const extractPdfText = async (blob: Blob): Promise<string> => {
+    try {
+        // @ts-ignore
+        if (typeof window !== 'undefined' && window.pdfjsLib) {
+            const arrayBuffer = await blobToArrayBuffer(blob);
+            // @ts-ignore
+            const loadingTask = window.pdfjsLib.getDocument({ 
+                data: arrayBuffer,
+                cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+                cMapPacked: true,
+            });
+            const pdf = await loadingTask.promise;
+            
+            let fullText = "";
+            const maxPages = Math.min(pdf.numPages, 15); // 限制页数防止过载
+            
+            for (let i = 1; i <= maxPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map((item: any) => item.str).join(' ');
+                fullText += `[第${i}页]: ${pageText}\n`;
+            }
+            return fullText;
+        }
+    } catch (e) {
+        console.error("PDF Parse Error", e);
+    }
+    return "";
 };
 
 const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     try {
         let mimeType = file.mimeType || 'text/plain';
-        let blob: Blob | null = null;
+        let base64Data = "";
         
-        // 🔴 PRIORITY 1: Read directly from local file object if available
-        // This completely bypasses CORS issues for newly uploaded files
-        if (file.file) {
-            blob = file.file;
-            mimeType = file.file.type || mimeType;
+        // 🛡️ 核心修复: JSON序列化后的 file 对象会变成空对象 {}，必须通过 instanceof Blob 过滤
+        let blob: Blob | undefined = (file.file instanceof Blob) ? file.file : undefined;
+
+        // 1. 如果有有效的 File/Blob 对象 (刚上传，内存中)，直接使用
+        if (blob) {
+            mimeType = blob.type || mimeType;
         } 
-        // Priority 2: Fetch from URL
-        else if (file.isUrl || file.data.startsWith('http')) {
-             blob = await fetchUrlAsBlob(file.data);
-             if (blob.type) mimeType = blob.type;
-        } 
-        // Priority 3: Base64 Data URI
+        // 2. 如果只有 URL (页面刷新后，或者 file 对象无效)，尝试下载 Blob
+        else if (file.data.startsWith('http')) {
+            try {
+                blob = await fetchUrlAsBlob(file.data);
+                mimeType = blob.type || mimeType; // 更新真实的 MIME
+            } catch (fetchErr: any) {
+                console.warn(`Remote fetch failed for ${file.name}:`, fetchErr);
+                // 🟢 智能降级：返回给 AI 一个明确的 System Prompt
+                return { 
+                    text: `[系统警告: 附件 "${file.name}" 读取失败。\n错误原因: ${fetchErr.message}。\n请告知用户："抱歉，我无法读取历史文件 ${file.name}。通常是因为云存储连接超时，请尝试**删除该附件并重新上传**。"]` 
+                };
+            }
+        }
+        // 3. 如果是 Base64 (旧数据)
         else if (file.data.startsWith('data:')) {
-             const res = await fetch(file.data);
-             blob = await res.blob();
+            const parts = file.data.split(',');
+            base64Data = parts[1];
+            // 尝试恢复 blob 用于 PDF 解析
+             if (file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
+                 try {
+                    const binaryStr = atob(base64Data);
+                    const bytes = new Uint8Array(binaryStr.length);
+                    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                    blob = new Blob([bytes], { type: mimeType });
+                 } catch(e) {}
+             }
         }
 
-        if (!blob) {
-            return { text: `[File: ${file.name} - Format unknown]` };
-        }
+        if (!blob && !base64Data) return { text: `[读取失败: ${file.name}]` };
 
-        // 2. Process based on Type
-        // Gemini supports PDF and Image via inlineData
-        if (mimeType.includes('pdf')) {
-            const base64Data = await blobToBase64(blob);
-            return { inlineData: { mimeType: 'application/pdf', data: base64Data } };
+        // 🟢 PDF 智能处理
+        if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
+            if (blob) {
+                const pdfText = await extractPdfText(blob);
+                if (pdfText && pdfText.trim().length > 20) {
+                     return { text: `[PDF文档内容 ${file.name}]:\n${pdfText}` };
+                }
+            }
+            // 降级：如果解析不出文本，尝试发图片 (Base64)
+            if (base64Data) return { inlineData: { mimeType: 'application/pdf', data: base64Data } };
+            if (blob) return { inlineData: { mimeType: 'application/pdf', data: await blobToBase64(blob) } };
         } 
+        
+        // 图片
         else if (mimeType.startsWith('image/')) {
-            const base64Data = await blobToBase64(blob);
-            return { inlineData: { mimeType: mimeType, data: base64Data } };
+            if (base64Data) return { inlineData: { mimeType, data: base64Data } };
+            if (blob) return { inlineData: { mimeType, data: await blobToBase64(blob) } };
+        } 
+        
+        // DOCX
+        else if (file.name.endsWith('.docx') && blob) {
+            return { text: `[文档内容 ${file.name}]:\n${await extractDocxText(blob)}` };
+        } 
+        
+        // 纯文本
+        else if (blob) {
+            // text() also needs to be handled if blob is not standard, but assuming blobToBase64 check passed
+            return { text: `[文档内容 ${file.name}]:\n${await blob.text()}` };
         }
-        // For Office docs (DOCX) -> Extract Text
-        else if (mimeType.includes('wordprocessingml') || file.name.endsWith('.docx')) {
-            const textContent = await extractDocxText(blob);
-            return { text: `[文档内容 ${file.name}]:\n${textContent}` };
-        }
-        // For Text based files
-        else if (mimeType.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
-            const textContent = await blob.text();
-            return { text: `[文档内容 ${file.name}]:\n${textContent}` };
-        }
-        else {
-             return { text: `[文件 ${file.name} (${mimeType}) - 暂不支持深度内容分析，仅作为上下文参考]` };
-        }
+        
+        return { text: `[未知文件类型: ${file.name}]` };
 
-    } catch (e: any) {
-        console.error("File Prep Error", e);
-        return { text: `[文件读取失败: ${file.name} - ${e.message}]` };
+    } catch (e: any) { 
+        console.error(`File processing error for ${file.name}:`, e);
+        return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; 
     }
 };
 
-// --- API CALLER ---
-
-const fetchGemini = async (endpoint: string, googleBody: any, stream: boolean = false) => {
-  const sysConfig = await configRepo.getSystemConfig();
-  const { apiKey, baseUrl, model } = sysConfig.gemini;
-  
-  if (!apiKey) throw new Error("AI 密钥未配置，请联系管理员");
-
-  const isOpenAI = apiKey.startsWith('sk-') || baseUrl.includes('vectorengine') || baseUrl.includes('openai');
-
-  if (isOpenAI) {
-      // OpenAI Compatibility Mode (Simplified)
-      let targetUrl = baseUrl.replace(/\/$/, '');
-      if (!targetUrl.endsWith('/v1/chat/completions')) {
-          if (targetUrl.endsWith('/v1')) targetUrl += '/chat/completions';
-          else targetUrl += '/v1/chat/completions';
-      }
-
-      const messages: any[] = [];
-      if (googleBody.systemInstruction) {
-          messages.push({ role: 'system', content: googleBody.systemInstruction.parts[0].text });
-      }
-      if (googleBody.contents) {
-          for (const c of googleBody.contents) {
-              const contentParts: any[] = [];
-              if (c.parts) {
-                  for (const p of c.parts) {
-                      if (p.text) {
-                          contentParts.push({ type: 'text', text: p.text });
-                      } else if (p.inlineData) {
-                          contentParts.push({ 
-                              type: 'image_url', 
-                              image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` } 
-                          });
-                      }
-                  }
-              }
-              const finalContent = (contentParts.length === 1 && contentParts[0].type === 'text') ? contentParts[0].text : contentParts;
-              messages.push({ role: c.role || 'user', content: finalContent });
-          }
-      }
-
-      const openAIBody = {
-          model: model,
-          messages: messages,
-          stream: stream,
-          temperature: googleBody.generationConfig?.temperature || 0.7,
-          max_tokens: googleBody.generationConfig?.maxOutputTokens || 4096
-      };
-
-      const response = await fetch(targetUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-          body: JSON.stringify(openAIBody)
-      });
-
-      if (!response.ok) throw new Error(`API Error: ${response.status}`);
-      return response;
-
-  } else {
-      // Native Google Gemini API
-      let finalUrl = "";
-      const cleanBaseUrl = baseUrl.replace(/\/$/, '');
-      if (cleanBaseUrl.includes('/models/')) {
-          const separator = endpoint.includes('?') ? '&' : '?';
-          finalUrl = `${cleanBaseUrl}${separator}key=${apiKey}`;
-      } else {
-          const separator = endpoint.includes('?') ? '&' : '?';
-          finalUrl = `${cleanBaseUrl}/v1beta/models/${model}:${endpoint}${separator}key=${apiKey}`;
-      }
-
-      const response = await fetch(finalUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(googleBody)
-      });
-
-      if (!response.ok) throw new Error(`Google API Error: ${response.status}`);
-      return response;
-  }
+const getAIClient = () => {
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
-
-// --- EXPORTED FUNCTIONS ---
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
-    if (files.length === 0) return "没有检测到可分析的文件。";
-
-    // 1. Prepare parts with REAL content (base64 images/pdf, extracted text)
-    // Map promises first to run in parallel
-    const fileParts = await Promise.all(files.map(f => prepareFilePart(f)));
-
-    const promptPart = { text: `你是一位顶级内容策略专家。请对以下 ${files.length} 份素材进行【深度拆解】，目的是为了辅助撰写最具转化率的小红书笔记。
-
-请不要只做简单的摘要，我要的是【营销爆点】和【写作素材】。
-对于图片，请分析其视觉风格、关键元素和传达的情绪。
-对于文档（PDF/Word），请提取核心干货、数据和专业背书。
-
-请严格按以下结构输出分析报告（Markdown）：
-
-## 1. 核心卖点提炼 (Unique Selling Points)
-*请列出3-5个最强的产品/内容优势，用“痛点-解决方案”的逻辑描述。*
-- **[卖点1]**: 针对 [什么痛点]，提供了 [什么解决]，优势是 [具体参数/成分/效果]。
-- **[卖点2]**: ...
-
-## 2. 目标人群画像 (Target Audience)
-*谁最需要这个？*
-
-## 3. 内容细节素材库 (Content Details)
-*提取具体的、可直接用于正文的数据、金句或场景描述。*
-- **关键数据**: (价格、含量、实验数据等)
-- **视觉/场景**: (图片中的氛围、颜色、适用场景)
-
-## 4. 爆款选题切入点
-*基于素材，给出 3 个高流量的笔记标题切入方向。*
-
----
-以下是素材内容：` };
-
-    const parts = [promptPart, ...fileParts];
-
+    if (files.length === 0) return "无文件可分析";
+    const ai = getAIClient();
     try {
-        const response = await fetchGemini('generateContent', {
-            contents: [{ role: 'user', parts: parts }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
+        const fileParts = await Promise.all(files.map(prepareFilePart));
+        const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: { parts: [{ text: prompt }, ...fileParts] },
+            config: { temperature: 0.2 }
         });
-        
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        return text || "未能生成分析结果。";
+        return cleanText(response.text || "分析失败");
     } catch (e: any) {
-        throw new Error(`资料分析失败: ${e.message}`);
+        return `分析过程发生错误: ${e.message || '未知错误'}`;
     }
+};
+
+// 解析批量生成的笔记
+const parseBulkNotes = (text: string): BulkNote[] => {
+    const notes: BulkNote[] = [];
+    // 匹配 "### 方案N" 或 "### 笔记N" 这样的分隔符
+    const parts = text.split(/###\s*(?:方案|笔记|Version)\s*\d+/i);
+    
+    // 忽略第一个空部分（如果文本以分隔符开头）
+    for (let i = 1; i < parts.length; i++) {
+        const part = parts[i].trim();
+        if (!part) continue;
+
+        // 尝试提取标题和正文
+        // 格式通常是 "标题：xxx \n 正文：xxx"
+        let title = "";
+        let content = "";
+
+        const titleMatch = part.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
+        if (titleMatch) {
+            title = titleMatch[1].trim();
+            // 剩下的部分，去掉标题行就是正文
+            content = part.replace(titleMatch[0], "").trim();
+            // 去掉可能的 "正文：" 前缀
+            content = content.replace(/^(?:正文|Content)[:：]\s*/i, "").trim();
+        } else {
+            // 如果没有明确的标题标签，取第一行做标题
+            const lines = part.split('\n');
+            title = lines[0].trim();
+            content = lines.slice(1).join('\n').trim();
+        }
+
+        if (title || content) {
+            notes.push({ title, content });
+        }
+    }
+    return notes;
 };
 
 export const streamExpertGeneration = async (
-  context: string,
-  files: AttachedFile[],
-  personaPrompt: string,
-  fidelity: FidelityMode,
-  count: number = 1,
-  wordCountLimit: number = 400,
-  onToken?: (text: string, thought: string) => void
-): Promise<{ dialogueText: string; thought: string; notes: BulkNote[] }> => {
-
-  let modeInstruction = fidelity === FidelityMode.STRICT ? 
-    `【专业/严谨模式】绝对忠实于参考资料，禁止虚构。` : 
-    `【创意/素人模式】发挥创意，合理联想，情感渲染，口语化表达。`;
-
-  const systemInstruction = {
-    parts: [{ text: `你是一位顶级小红书内容专家。
-博主风格设定：${personaPrompt}
-${modeInstruction}
-
-【绝对规则 - 必须遵守】
-1. 语言：简体中文。
-2. **字数红线**：每篇笔记正文严格控制在 **${wordCountLimit} 字以内**！
-3. 流程：
-   - 先输出思考过程 [[THOUGHT]]...[[/THOUGHT]]
-   - 再输出正文 (纯文本)
-   - 最后输出数据分隔符 ${DATA_MARKER} 和 JSON数据: { "notes": [ { "title": "...", "content": "..." } ] }
-
-篇数 ${count}。` }]
-  };
-
-  // Process files to be actual content parts (Inline Data or Text)
-  const fileParts = await Promise.all(files.map(f => prepareFilePart(f)));
-  
-  const contents = [{ 
-      role: 'user', 
-      parts: [
-          { text: context }, 
-          ...fileParts
-      ] 
-  }];
-
-  try {
-    const response = await fetchGemini('streamGenerateContent?alt=sse', {
-      contents,
-      systemInstruction,
-      generationConfig: { 
-          temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.9, 
-      }
-    }, true);
-
-    if (!response.body) throw new Error("No response body");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    context: string,
+    files: AttachedFile[],
+    personaPrompt: string | undefined,
+    fidelity: FidelityMode,
+    count: number,
+    wordLimit: number,
+    onToken: (text: string, thought: string) => void
+) => {
+    const ai = getAIClient();
     
-    let fullText = "";
-    let thoughtBuffer = "";
-    let dialogueBuffer = "";
-    let inThought = false;
-    let dataMarkerFound = false;
+    // 极致的字数硬约束
+    const wordCountConstraint = `
+🚨 **字数硬性指标 (非常重要)**:
+生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。
+- 如果目标是短篇，请务必精炼，直击痛点。
+- 如果目标是长篇，请丰富细节，增强沉浸感。
+- **严禁超出或大幅少于设定字数，请以此字数为基准进行排版。**
+`;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      const chunkStr = decoder.decode(value, { stream: true });
-      const lines = chunkStr.split('\n');
-      
-      for (const line of lines) {
-        let content = "";
-        const trimmed = line.trim();
-        
-        if (trimmed.startsWith('data:')) {
-            const jsonStr = trimmed.slice(5).trim();
-            if (jsonStr === '[DONE]') continue;
-            try {
-                const data = JSON.parse(jsonStr);
-                content = data.candidates?.[0]?.content?.parts?.[0]?.text || 
-                          data.choices?.[0]?.delta?.content || "";
-            } catch (e) {}
-        } 
+    const chineseStrictRules = `
+🚨 **内容创作铁律**:
+1. 语言：必须全中文。
+2. 标题：吸睛且控制在 20 字以内。
+3. 结构：符合小红书分段习惯，每段配有 Emoji。
+${wordCountConstraint}
+`;
 
-        if (content) {
-            fullText += content;
-
-            if (dataMarkerFound) continue; 
-
-            if (!inThought && content.includes(THOUGHT_START)) {
-                inThought = true;
-            }
-            
-            if (inThought) {
-                thoughtBuffer += content;
-                if (thoughtBuffer.includes(THOUGHT_END)) {
-                    inThought = false;
-                    const rawThought = thoughtBuffer.replace(THOUGHT_START, '').replace(THOUGHT_END, '');
-                    if (onToken) onToken(dialogueBuffer, rawThought);
-                } else {
-                    if (onToken) onToken(dialogueBuffer, thoughtBuffer.replace(THOUGHT_START, ''));
-                }
-            } else {
-                if (fullText.includes(DATA_MARKER)) {
-                    dataMarkerFound = true;
-                    const parts = fullText.split(DATA_MARKER);
-                    dialogueBuffer = parts[0].replace(/\[\[THOUGHT\]\][\s\S]*?\[\[\/THOUGHT\]\]/g, '').trim();
-                } else {
-                    dialogueBuffer += content;
-                }
-                
-                if (!inThought && onToken) {
-                     onToken(dialogueBuffer, thoughtBuffer.replace(THOUGHT_START, '').replace(THOUGHT_END, ''));
-                }
-            }
-        }
-      }
+    const commonRules = `🚨 **核心规范**: 1. 严禁输出 <thinking> 标签。2. 语气符合小红书博主身份。${chineseStrictRules}`;
+    
+    let systemText = "";
+    if (fidelity === FidelityMode.STRICT) {
+        systemText = `【角色】：你是一个专业、严谨的内容重构专家。你的任务是基于提供的素材撰写笔记，而不是自由创作。\n${commonRules}\n🚨 **严谨模式规则 (Strict Mode)**:\n1. **绝对忠实于素材**：你只能使用用户提供的【背景】、【文档内容】和【图片】中的信息。\n2. **严禁虚构 (No Hallucination)**：严禁编造素材中未提及的数据、故事、参数或细节。如果素材信息不足，请侧重于强化已有信息的表达，而不要捏造新信息。\n3. 语气权威，逻辑严密，不使用过于浮夸的形容词。`;
+    } else {
+        systemText = `【角色】：你是一个亲切、真实的个人号小红书博主。\n${commonRules}\n1. 语气口语化、亲和力强。2. 可以适当发挥想象力补充生活化细节，强调个人感受。`;
     }
 
-    let finalThought = "";
-    let finalDialogue = fullText;
-    let jsonPart = null;
-
-    const tStart = fullText.indexOf(THOUGHT_START);
-    const tEnd = fullText.indexOf(THOUGHT_END);
-    if (tStart !== -1 && tEnd !== -1) {
-        finalThought = fullText.substring(tStart + THOUGHT_START.length, tEnd).trim();
-        finalDialogue = fullText.substring(0, tStart) + fullText.substring(tEnd + THOUGHT_END.length);
+    if (personaPrompt) {
+        systemText += `\n\n【风格指令】:\n${personaPrompt}`;
     }
 
-    const splitParts = finalDialogue.split(DATA_MARKER);
-    finalDialogue = splitParts[0].trim();
-    if (splitParts.length > 1) {
-        jsonPart = splitParts[1].trim();
+    // 🟢 批量生成的核心指令注入
+    if (count > 1) {
+        systemText += `\n\n🚨 **批量生成指令**:\n请务必生成 **${count}** 篇完全不同的笔记方案。
+请严格按照以下格式输出，以便系统解析：
+### 方案1
+标题：(方案1的标题)
+正文：(方案1的内容)
+
+### 方案2
+标题：(方案2的标题)
+正文：(方案2的内容)
+
+...以此类推。不要包含其他开场白或结束语。`;
     }
 
-    let parsedNotes: BulkNote[] = [];
-    if (jsonPart) {
-        try { 
-            const parsed = extractAndParseJSON(jsonPart); 
-            parsedNotes = parsed?.notes || [];
-        } catch (e) { console.error("Stream JSON Error", e); }
-    }
-
-    return {
-      dialogueText: finalDialogue,
-      thought: finalThought,
-      notes: parsedNotes
-    };
-
-  } catch (error: any) {
-    throw new Error(`生成中断: ${error.message}`);
-  }
-};
-
-export const streamPersonaAnalysis = async (
-    samples: string,
-    onToken: (text: string) => void
-): Promise<PersonaAnalysis> => {
     try {
-        const response = await fetchGemini('streamGenerateContent?alt=sse', {
-            contents: [{ role: 'user', parts: [{ text: `以下是我的样本，请分析风格并返回 JSON：\n\n${samples}` }] }],
-            systemInstruction: { parts: [{ text: ANALYSIS_SYSTEM_PROMPT + "\n\nIMPORTANT: Return ONLY valid JSON. The 'tone' field MUST be concise (max 8 characters). No Markdown." }] },
-            generationConfig: { temperature: 0.4, maxOutputTokens: 8192, responseMimeType: "application/json" }
-        }, true);
-
-        if (!response.body) throw new Error("No response body");
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = "";
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            for(const line of lines) {
-                if(line.startsWith('data:') && line !== 'data: [DONE]') {
-                    try {
-                        const data = JSON.parse(line.slice(5));
-                        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || data.choices?.[0]?.delta?.content;
-                        if(text) { fullText += text; onToken(fullText); }
-                    } catch(e){}
-                }
+        const fileParts = await Promise.all(files.map(prepareFilePart));
+        
+        const response = await ai.models.generateContentStream({
+            model: 'gemini-3-pro-preview',
+            contents: { parts: [{ text: context || "请根据提供的背景和资料开始创作。" }, ...fileParts] },
+            config: {
+                systemInstruction: systemText,
+                temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85
             }
-        }
-        
-        const result = extractAndParseJSON(fullText);
-        
-        if (result && result.tone) {
-            return result;
-        } else {
-            return { 
-                tone: "自定义风格 (自动提取)", 
-                keywords: ["提取结果"], 
-                emojiDensity: "未识别", 
-                structure: "未识别", 
-                writerPersonaPrompt: fullText.substring(0, 1000)
-            };
-        }
-    } catch (e: any) {
-        throw new Error(`分析失败: ${e.message}`);
-    }
-};
-
-export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
-    try {
-        await fetchGemini('generateContent', {
-            contents: [{ role: 'user', parts: [{ text: 'Ping' }] }],
-            generationConfig: { maxOutputTokens: 1 }
         });
-        return { success: true, message: "连接成功" };
+
+        let fullText = "";
+        for await (const chunk of response) {
+            const text = chunk.text;
+            if (text) {
+                fullText += text;
+                onToken(cleanText(fullText), "");
+            }
+        }
+
+        // 🟢 流式结束后，解析批量笔记
+        let parsedNotes: BulkNote[] = [];
+        if (count > 1) {
+            parsedNotes = parseBulkNotes(cleanText(fullText));
+        }
+
+        return { dialogueText: cleanText(fullText), thought: "", notes: parsedNotes };
     } catch (e: any) {
-        return { success: false, message: e.message || "连接失败" };
+        return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] };
+    }
+};
+
+export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
+    const ai = getAIClient();
+    const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: prompt,
+            config: {
+                systemInstruction: ANALYSIS_SYSTEM_PROMPT,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        tone: { type: Type.STRING },
+                        keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        emojiDensity: { type: Type.STRING },
+                        structure: { type: Type.STRING },
+                        writerPersonaPrompt: { type: Type.STRING }
+                    },
+                    required: ["tone", "keywords", "emojiDensity", "structure", "writerPersonaPrompt"]
+                }
+            }
+        });
+        const resultText = response.text || "{}";
+        onToken(resultText);
+        return extractAndParseJSON(resultText) || { tone: "默认" };
+    } catch (e: any) {
+        console.error("Persona Analysis Error", e);
+        return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" };
+    }
+};
+
+export const testConnection = async () => {
+    try {
+        const ai = getAIClient();
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: 'ping',
+            config: { thinkingConfig: { thinkingBudget: 0 } }
+        });
+        return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
+    } catch (e: any) {
+        return { success: false, message: e.message || "连接发生未知错误" };
     }
 };

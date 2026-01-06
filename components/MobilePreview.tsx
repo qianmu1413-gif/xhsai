@@ -1,39 +1,171 @@
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Battery, Signal, Wifi, ChevronLeft, Image as ImageIcon, X, ChevronRight, Check, Plus, Trash2, Save, LayoutTemplate, Archive, Loader2, QrCode, CheckCircle, Download, Share2, Heart, MessageCircle, Star, MoreHorizontal, MapPin, Settings2, GripHorizontal, ArrowLeft, Crop, Maximize2, AlertCircle, Move, ZoomIn, ArrowRight, CheckSquare, Square, Link as LinkIcon, Folder, FolderOpen, Filter, MousePointerClick, Type, Hash } from 'lucide-react';
-import { publishToXHS } from '../services/publishService';
+import React, { useState, useRef, useMemo, memo, useEffect } from 'react';
+import { Signal, Wifi, Battery, ChevronLeft, Share2, Plus, Heart, Star, MessageCircle, Edit3, Camera, Loader2, Send, Save, QrCode, CheckCircle2, Download, Trash2, X, FilePlus, ImageIcon, AlertCircle, FolderPlus, Folder, Filter, MoreVertical, Pencil, Check, DownloadCloud, Image as ImageIconLucide, MoreHorizontal, Layers, RotateCcw, MapPin, Lock, Type, Search, CheckSquare } from 'lucide-react';
 import { NoteDraft, PublishedRecord, User } from '../types';
+import { publishToXHS } from '../services/publishService';
 import Toast, { ToastState } from './Toast';
 
-const PLACEHOLDER_POOL = [
-    "https://images.unsplash.com/photo-1618331835717-801e976710b2?q=80&w=1000&auto=format&fit=crop", 
-    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop", 
-    "https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?q=80&w=1000&auto=format&fit=crop", 
-    "https://images.unsplash.com/photo-1516483638261-f4dbaf036963?q=80&w=1000&auto=format&fit=crop", 
-    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=1000&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=1000&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1483985988355-763728e1935b?q=80&w=1000&auto=format&fit=crop"
-];
+const DEFAULT_NOTE_IMAGE = "https://images.unsplash.com/photo-1518133910546-b6c2fb7d79e3?q=80&w=1000&auto=format&fit=crop";
 
-const getRandomImage = (seed: string) => {
-    let hash = 0;
-    const safeSeed = seed || 'default';
-    for (let i = 0; i < safeSeed.length; i++) {
-        hash = safeSeed.charCodeAt(i) + ((hash << 5) - hash);
+// 字符长度计算 (字母 = 1个字)
+const getCharacterCount = (str: string) => {
+  return str ? str.length : 0;
+};
+
+// --- 图片合成核心引擎 (升级版 3:4 比例) ---
+const loadImage = (url: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous'; 
+        img.onload = () => resolve(img);
+        img.onerror = () => {
+            fetch(url)
+                .then(res => res.blob())
+                .then(blob => {
+                    const objUrl = URL.createObjectURL(blob);
+                    const fallbackImg = new Image();
+                    fallbackImg.onload = () => resolve(fallbackImg);
+                    fallbackImg.onerror = reject;
+                    fallbackImg.src = objUrl;
+                })
+                .catch(reject);
+        };
+        img.src = url;
+    });
+};
+
+const generateShareCard = async (record: PublishedRecord, username: string = '创作者'): Promise<string> => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas init failed');
+
+    // 设定 3:4 比例 (900x1200) 高清
+    const width = 900;
+    const height = 1200; 
+    const padding = 56; // 边距
+
+    // 1. 加载资源
+    const coverUrl = record.coverImage || record.imageUrls?.[0] || DEFAULT_NOTE_IMAGE;
+    let coverImg, qrImg;
+    
+    try {
+        [coverImg, qrImg] = await Promise.all([
+            loadImage(coverUrl),
+            loadImage(record.qrCodeUrl)
+        ]);
+    } catch (e) {
+        throw new Error("图片资源加载失败，请检查网络");
     }
-    const index = Math.abs(hash) % PLACEHOLDER_POOL.length;
-    return PLACEHOLDER_POOL[index];
+
+    canvas.width = width;
+    canvas.height = height;
+
+    // 2. 绘制背景 (纯白底色)
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+
+    // 3. 绘制封面图 (占据顶部约 70% 区域)
+    const imageAreaHeight = 840; // 70% height
+    
+    // 图片裁剪逻辑 (Cover 模式)
+    const imgRatio = coverImg.width / coverImg.height;
+    const targetRatio = width / imageAreaHeight;
+    let renderW, renderH, offsetX, offsetY;
+
+    if (imgRatio > targetRatio) {
+        renderH = imageAreaHeight;
+        renderW = imageAreaHeight * imgRatio;
+        offsetX = (width - renderW) / 2;
+        offsetY = 0;
+    } else {
+        renderW = width;
+        renderH = width / imgRatio;
+        offsetX = 0;
+        offsetY = (imageAreaHeight - renderH) / 2;
+    }
+    
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, imageAreaHeight);
+    ctx.clip();
+    ctx.drawImage(coverImg, offsetX, offsetY, renderW, renderH);
+    ctx.restore();
+
+    // 4. 绘制底部内容区域
+    const contentY = imageAreaHeight + 50;
+    
+    // 二维码 (右下角)
+    const qrSize = 180;
+    const qrX = width - padding - qrSize;
+    const qrY = height - padding - qrSize - 10;
+    
+    // 绘制标题 (左侧，最大宽度需避开二维码)
+    ctx.fillStyle = '#111827'; // Gray 900
+    ctx.font = 'bold 48px "PingFang SC", "Microsoft YaHei", sans-serif';
+    const text = record.title || '无标题';
+    const titleMaxWidth = width - (padding * 2) - qrSize - 40; 
+    
+    const words = text.split('');
+    let line = '';
+    let lineCount = 0;
+    let titleY = contentY + 10;
+    const lineHeight = 70;
+
+    // 标题换行逻辑 (最多2行)
+    for(let n = 0; n < words.length; n++) {
+        const testLine = line + words[n];
+        if (ctx.measureText(testLine).width > titleMaxWidth && n > 0) {
+            ctx.fillText(line, padding, titleY);
+            line = words[n];
+            titleY += lineHeight;
+            lineCount++;
+            if (lineCount >= 2) {
+                 const remaining = text.substring(n);
+                 if (ctx.measureText(remaining).width > titleMaxWidth) {
+                     line = words[n] + '...'; 
+                     n = words.length; 
+                 }
+            }
+            if (lineCount >= 2) break;
+        } else {
+            line = testLine;
+        }
+    }
+    if (lineCount < 2) ctx.fillText(line, padding, titleY);
+
+    // 用户信息与品牌 (左下角)
+    const infoY = height - padding - 30;
+    
+    // 用户名
+    ctx.fillStyle = '#4B5563'; // Gray 600
+    ctx.font = 'bold 32px sans-serif';
+    ctx.fillText(`@${username}`, padding, infoY);
+    
+    // 品牌标识
+    ctx.fillStyle = '#FF2442'; // XHS Red
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText("REDNOTE | 小红书", padding, infoY - 50);
+
+    // 绘制二维码
+    ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+    
+    // 扫码提示
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#9CA3AF'; // Gray 400
+    ctx.font = '22px sans-serif';
+    ctx.fillText("长按扫码查看", qrX + qrSize/2, qrY + qrSize + 30);
+
+    return canvas.toDataURL('image/png');
 };
 
 interface MobilePreviewProps {
   content: string;
   onContentChange: (newContent: string) => void;
   onCopy: () => void;
-  targetWordCount?: number;
-  onSaveToLibrary: (title: string, content: string, type: 'prompt' | 'note') => void;
+  onSaveToLibrary: (title: string, content: string, type: 'prompt' | 'note', existingId?: string, folder?: string) => void;
   drafts?: NoteDraft[];
-  onSelectDraft?: (draft: NoteDraft) => void;
   onDeleteDraft?: (id: string) => void;
+  onDeleteDraftBatch?: (ids: string[]) => void;
   images?: string[]; 
   onImagesChange: (images: string[]) => void;
   publishedHistory?: PublishedRecord[]; 
@@ -42,706 +174,623 @@ interface MobilePreviewProps {
   onDeletePublishedBatch?: (ids: string[]) => void; 
   onFileUpload?: (files: File[]) => Promise<string[]>; 
   user?: User; 
-  onPublishBatch?: (items: { title: string, content: string, images: string[] }[]) => Promise<void>;
-}
-
-// 字符长度计算
-const getLength = (str: string) => {
-  if (!str) return 0;
-  let len = 0;
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if (code >= 0 && code <= 127) {
-      len += 0.5;
-    } else {
-      len += 1;
-    }
-  }
-  return Math.ceil(len);
-};
-
-// --- 裁切组件 ---
-const InteractiveCropper = ({ imgUrl, onCancel, onSave }: { imgUrl: string, onCancel: () => void, onSave: (newUrl: string) => void }) => {
-    const [aspect, setAspect] = useState<number>(3/4);
-    const [scale, setScale] = useState(1);
-    const [offset, setOffset] = useState({ x: 0, y: 0 });
-    const [isDragging, setIsDragging] = useState(false);
-    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-    
-    const containerRef = useRef<HTMLDivElement>(null);
-    const imgRef = useRef<HTMLImageElement>(null);
-
-    useEffect(() => {
-        setScale(1);
-        setOffset({ x: 0, y: 0 });
-    }, [aspect]);
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        setIsDragging(true);
-        setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
-    };
-
-    const handleMouseMove = (e: React.MouseEvent) => {
-        if (!isDragging) return;
-        setOffset({
-            x: e.clientX - dragStart.x,
-            y: e.clientY - dragStart.y
-        });
-    };
-
-    const handleMouseUp = () => setIsDragging(false);
-
-    const handleWheel = (e: React.WheelEvent) => {
-        e.stopPropagation();
-        const newScale = Math.max(1, Math.min(3, scale - e.deltaY * 0.001));
-        setScale(newScale);
-    };
-
-    const handleSave = () => {
-        if (!imgRef.current) return;
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const outputWidth = 1080;
-        const outputHeight = outputWidth / aspect;
-
-        canvas.width = outputWidth;
-        canvas.height = outputHeight;
-
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const img = imgRef.current;
-        const nw = img.naturalWidth;
-        const nh = img.naturalHeight;
-        
-        const cropBoxW = outputWidth;
-        const cropBoxH = outputHeight;
-        
-        const imgAspect = nw / nh;
-        const cropAspect = cropBoxW / cropBoxH;
-        
-        let baseRenderW, baseRenderH;
-        
-        if (imgAspect > cropAspect) {
-            baseRenderH = cropBoxH;
-            baseRenderW = baseRenderH * imgAspect;
-        } else {
-            baseRenderW = cropBoxW;
-            baseRenderH = baseRenderW / imgAspect;
-        }
-        
-        const finalRenderW = baseRenderW * scale;
-        const finalRenderH = baseRenderH * scale;
-        
-        const screenToCanvasRatio = outputWidth / 280; 
-        
-        const centerOffsetX = (cropBoxW - finalRenderW) / 2;
-        const centerOffsetY = (cropBoxH - finalRenderH) / 2;
-        
-        const userOffsetX = offset.x * screenToCanvasRatio;
-        const userOffsetY = offset.y * screenToCanvasRatio;
-
-        ctx.drawImage(
-            img, 
-            centerOffsetX + userOffsetX, 
-            centerOffsetY + userOffsetY, 
-            finalRenderW, 
-            finalRenderH
-        );
-
-        onSave(canvas.toDataURL('image/png', 0.9));
-    };
-
-    return (
-        <div className="absolute inset-0 bg-black z-50 flex flex-col animate-fade-in" onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-            <div className="flex justify-between items-center px-4 py-4 text-white bg-black/50 backdrop-blur-md z-10">
-                <button onClick={onCancel} className="text-sm font-medium hover:text-gray-300 transition-colors active:scale-95">取消</button>
-                <span className="font-bold text-sm">调整裁切区域</span>
-                <button onClick={handleSave} className="text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors active:scale-95">完成</button>
-            </div>
-            
-            <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-[#111] select-none touch-none"
-                 onWheel={handleWheel}
-            >
-                <div 
-                    ref={containerRef}
-                    className="relative z-10 overflow-hidden ring-1 ring-white/50 shadow-[0_0_0_9999px_rgba(0,0,0,0.85)]"
-                    style={{ 
-                        aspectRatio: `${aspect}`, 
-                        width: '280px',
-                        cursor: isDragging ? 'grabbing' : 'grab'
-                    }}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                >
-                    <img 
-                        ref={imgRef}
-                        src={imgUrl}
-                        crossOrigin="anonymous"
-                        className="max-w-none pointer-events-none origin-center absolute left-1/2 top-1/2"
-                        style={{
-                            minWidth: '100%',
-                            minHeight: '100%',
-                            transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                        }}
-                    />
-                    <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
-                        {[...Array(9)].map((_, i) => <div key={i} className="border border-white/20"></div>)}
-                    </div>
-                </div>
-                
-                <div className="absolute bottom-6 left-0 right-0 text-center text-white/40 text-[10px] pointer-events-none">
-                    <Move size={12} className="inline mr-1"/> 拖动移动 <span className="mx-2">|</span> <ZoomIn size={12} className="inline mr-1"/> 滚动缩放
-                </div>
-            </div>
-
-            <div className="h-24 bg-black flex items-center justify-center gap-8 pb-6 border-t border-white/10">
-                <button onClick={() => setAspect(3/4)} className={`flex flex-col items-center gap-1.5 transition-colors active:scale-90 ${aspect === 3/4 ? 'text-white' : 'text-gray-600'}`}>
-                    <div className={`w-4 h-5 border-2 rounded-[2px] ${aspect === 3/4 ? 'border-white bg-white/20' : 'border-current'}`}></div>
-                    <span className="text-[10px] font-bold">3:4</span>
-                </button>
-                <button onClick={() => setAspect(1/1)} className={`flex flex-col items-center gap-1.5 transition-colors active:scale-90 ${aspect === 1 ? 'text-white' : 'text-gray-600'}`}>
-                     <div className={`w-5 h-5 border-2 rounded-[2px] ${aspect === 1 ? 'border-white bg-white/20' : 'border-current'}`}></div>
-                     <span className="text-[10px] font-bold">1:1</span>
-                </button>
-                <button onClick={() => setAspect(4/3)} className={`flex flex-col items-center gap-1.5 transition-colors active:scale-90 ${aspect === 4/3 ? 'text-white' : 'text-gray-600'}`}>
-                     <div className={`w-5 h-4 border-2 rounded-[2px] ${aspect === 4/3 ? 'border-white bg-white/20' : 'border-current'}`}></div>
-                     <span className="text-[10px] font-bold">4:3</span>
-                </button>
-                <button onClick={() => setAspect(16/9)} className={`flex flex-col items-center gap-1.5 transition-colors active:scale-90 ${aspect === 16/9 ? 'text-white' : 'text-gray-600'}`}>
-                     <div className={`w-6 h-3.5 border-2 rounded-[2px] ${aspect === 16/9 ? 'border-white bg-white/20' : 'border-current'}`}></div>
-                     <span className="text-[10px] font-bold">16:9</span>
-                </button>
-            </div>
-        </div>
-    );
-};
-
-const QRCodeDisplay = ({ value, size }: { value: string, size: number }) => {
-    if (value.startsWith('data:image') || (value.startsWith('http') && /\.(png|jpg|jpeg|gif|webp)$/i.test(value))) {
-        return <img src={value} alt="QR Code" style={{ width: size, height: size, objectFit: 'contain' }} />;
-    }
-    return (
-        <img 
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(value)}`}
-            alt="QR Code"
-            style={{ width: size, height: size, objectFit: 'contain' }}
-        />
-    );
-};
-
-interface FooterTemplate {
-    id: string;
-    name: string;
-    content: string;
+  activeItemId: string | null;
+  setActiveItemId: (id: string | null) => void;
+  onNewNote?: () => void;
 }
 
 const MobilePreview: React.FC<MobilePreviewProps> = ({
-  content = '', 
-  onContentChange, onCopy, targetWordCount = 400, onSaveToLibrary,
-  drafts = [], onSelectDraft, onDeleteDraft,
+  content = '', onContentChange, onSaveToLibrary,
+  drafts = [], onDeleteDraft, onDeleteDraftBatch,
   images = [], onImagesChange,
   publishedHistory = [], onSavePublished, onDeletePublished, onDeletePublishedBatch,
-  onFileUpload, user, onPublishBatch
+  onFileUpload, user, activeItemId, setActiveItemId, onNewNote
 }) => {
-  const [activeTab, setActiveTab] = useState<'preview' | 'all' | 'drafts' | 'published'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'all'>('preview');
+  const [activeFolder, setActiveFolder] = useState<string>('全部');
   const [isPublishing, setIsPublishing] = useState(false);
-  const [viewingQrCode, setViewingQrCode] = useState<{ qrcode: string; title: string; cover: string } | null>(null);
   const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'success' });
-  const [croppingImg, setCroppingImg] = useState<{ url: string, index: number } | null>(null);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isUploading, setIsUploading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set<string>());
+  const [showQrModal, setShowQrModal] = useState<PublishedRecord | null>(null);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false); 
+  const [isImageUploading, setIsImageUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   
-  // Custom Footer State
-  const [isCustomMode, setIsCustomMode] = useState(false);
-  const [customFooter, setCustomFooter] = useState('');
-  const [footerTemplates, setFooterTemplates] = useState<FooterTemplate[]>([]);
-  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState('');
-  
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['Drafts', 'Published']));
+  // 图片轮播状态
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const imageScrollRef = useRef<HTMLDivElement>(null);
+  const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const carouselRef = useRef<HTMLDivElement>(null);
-
-  // --- CAROUSEL DRAG LOGIC ---
-  const [isDragScroll, setIsDragScroll] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
-
-  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
-      if (!carouselRef.current) return;
-      setIsDragScroll(true);
-      const pageX = 'touches' in e ? e.touches[0].pageX : e.pageX;
-      setStartX(pageX - carouselRef.current.offsetLeft);
-      setScrollLeft(carouselRef.current.scrollLeft);
-  };
-
-  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
-      if (!isDragScroll || !carouselRef.current) return;
-      const pageX = 'touches' in e ? e.touches[0].pageX : e.pageX;
-      const x = pageX - carouselRef.current.offsetLeft;
-      const walk = (x - startX) * 1.5; 
-      carouselRef.current.scrollLeft = scrollLeft - walk;
-  };
-
-  const handleDragEnd = () => setIsDragScroll(false);
-
-  // Parse Content
   const safeContent = content || '';
   const title = safeContent.split('\n')[0] || '';
-  // Full Body (everything after title)
   const fullBody = safeContent.includes('\n') ? safeContent.substring(safeContent.indexOf('\n') + 1) : '';
 
-  // In Custom Mode, we assume the "Footer" is separated.
-  const tagsRegex = /((\s*#[^\s#]+)+)$/;
-  const match = fullBody.match(tagsRegex);
-  const detectedFooter = match ? match[1].trim() : '';
-  const bodyWithoutFooter = match ? fullBody.replace(tagsRegex, '').trim() : fullBody.trim();
-
-  // Determine what to show in the Textarea
-  const displayBody = isCustomMode ? bodyWithoutFooter : fullBody;
-  
-  // Real-time extracted tags from Custom Footer for display
-  const detectedTagsInFooter = (customFooter.match(/#[^\s#]+/g) || []);
-
-  const titleLen = getLength(title);
-  const bodyLen = getLength(displayBody);
-  const isTitleOver = titleLen > 20;
-  
-  const currentPlaceholder = React.useMemo(() => getRandomImage(title || 'default'), [title]);
   const showToast = (msg: string, type: 'success'|'error'|'info' = 'success') => setToast({ show: true, message: msg, type });
 
-  // Load Templates
-  useEffect(() => {
-      try {
-          const saved = localStorage.getItem('rednote_footer_templates');
-          if (saved) setFooterTemplates(JSON.parse(saved));
-      } catch(e) {}
-  }, []);
-
-  const saveTemplate = () => {
-      if (!newTemplateName.trim() || !customFooter.trim()) return showToast("名称或内容不能为空", 'error');
-      const newT = { id: Date.now().toString(), name: newTemplateName.trim(), content: customFooter };
-      const updated = [...footerTemplates, newT];
-      setFooterTemplates(updated);
-      localStorage.setItem('rednote_footer_templates', JSON.stringify(updated));
-      setIsSavingTemplate(false);
-      setNewTemplateName('');
-      showToast("模板已保存");
-  };
-
-  const deleteTemplate = (id: string) => {
-      const updated = footerTemplates.filter(t => t.id !== id);
-      setFooterTemplates(updated);
-      localStorage.setItem('rednote_footer_templates', JSON.stringify(updated));
-  };
-
-  // Toggle Custom Mode Logic
-  const toggleCustomMode = () => {
-      if (!isCustomMode) {
-          // Turn ON: Initialize footer with what we detected (usually just tags)
-          setCustomFooter(detectedFooter);
-          setIsCustomMode(true);
-      } else {
-          // Turn OFF: Just switch mode
-          setIsCustomMode(false);
-      }
-  };
-
-  // Helper to construct full content based on current mode & inputs
-  const updateFullContent = (newBody: string, footer: string) => {
-      const footerPart = footer ? `\n\n${footer}` : '';
-      const finalBody = `${newBody}${footerPart}`;
-      onContentChange(`${title}\n${finalBody}`);
-  };
-
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = e.target.value;
-      const currentFullBody = safeContent.includes('\n') ? safeContent.substring(safeContent.indexOf('\n') + 1) : '';
-      onContentChange(`${val}\n${currentFullBody}`);
-  };
-
-  const handleBodyChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const val = e.target.value;
-      if (isCustomMode) {
-          updateFullContent(val, customFooter);
-      } else {
-          onContentChange(`${title}\n${val}`);
-      }
-  };
-  
-  const handleFooterChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const val = e.target.value;
-      setCustomFooter(val);
-      if (isCustomMode) updateFullContent(displayBody, val);
-  };
-
-  const groupedItems = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-    const safeDrafts = drafts || [];
-    const safePubs = publishedHistory || [];
-    safeDrafts.forEach(draft => {
-        const category = draft.personaName ? `📂 ${draft.personaName}` : '📁 未分类草稿';
-        if (!groups[category]) groups[category] = [];
-        groups[category].push({ ...draft, _type: 'draft' });
-    });
-    safePubs.forEach(pub => {
-        const category = '🚀 已发布';
-        if (!groups[category]) groups[category] = [];
-        groups[category].push({ ...pub, _type: 'published' });
-    });
-    return groups;
-  }, [drafts, publishedHistory]);
-
-  const toggleCategory = (cat: string) => {
-      setExpandedCategories(prev => {
-          const next = new Set(prev);
-          if (next.has(cat)) next.delete(cat);
-          else next.add(cat);
-          return next;
+  // 1. 深度聚合与去重
+  const mergedItems = useMemo(() => {
+      const map = new Map<string, any>();
+      // 先放入草稿
+      drafts.forEach(d => {
+          map.set(String(d.id), { 
+              ...d, 
+              _type: 'draft', 
+              timestamp: d.createdAt, 
+              folder: d.folder || '默认分类' 
+          });
       });
-  };
+      // 再放入已发布
+      publishedHistory.forEach(p => {
+          map.set(String(p.id), { 
+              ...p, 
+              _type: 'published', 
+              timestamp: p.publishedAt, 
+              folder: p.folder || '默认分类' 
+          });
+      });
+      return Array.from(map.values()).sort((a, b) => b.timestamp - a.timestamp);
+  }, [publishedHistory, drafts]);
 
-  useEffect(() => { setExpandedCategories(new Set(Object.keys(groupedItems))); }, [Object.keys(groupedItems).length]);
+  const activePublishedRecord = useMemo(() => {
+      if (!activeItemId) return null;
+      return publishedHistory.find(r => String(r.id) === String(activeItemId));
+  }, [activeItemId, publishedHistory]);
 
-  const handlePublish = async () => {
-      if (!title.trim()) return showToast("标题不能为空", 'error');
-      if (!displayBody.trim()) return showToast("正文不能为空", 'error');
-      
-      let finalImages = images;
-      if (images.length === 0) {
-          finalImages = [currentPlaceholder];
-          onImagesChange(finalImages);
+  const folders = useMemo(() => {
+      const set = new Set<string>(['全部']);
+      mergedItems.forEach(item => { if (item.folder) set.add(item.folder); });
+      return Array.from(set);
+  }, [mergedItems]);
+
+  const displayItems = useMemo(() => {
+      let items = mergedItems;
+      if (activeFolder !== '全部') {
+          items = items.filter(i => i.folder === activeFolder);
       }
-      setIsPublishing(true);
-      try {
-          const qrcode = await publishToXHS({ title, content: safeContent, imageUrls: finalImages });
-          setViewingQrCode({ qrcode, title, cover: finalImages[0] });
-          if (onSavePublished) {
-              onSavePublished({
-                  id: Date.now().toString(),
-                  title,
-                  coverImage: finalImages[0],
-                  imageUrls: finalImages,
-                  qrCodeUrl: qrcode,
-                  publishedAt: Date.now()
-              });
-          }
-      } catch (e: any) { showToast(`发布失败: ${e.message}`, 'error'); } 
-      finally { setIsPublishing(false); }
+      if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          items = items.filter(i => i.title?.toLowerCase().includes(q) || i.content?.toLowerCase().includes(q));
+      }
+      return items;
+  }, [activeTab, activeFolder, mergedItems, searchQuery]);
+
+  // Auto-resize title textarea
+  useEffect(() => {
+      if (titleTextareaRef.current) {
+          titleTextareaRef.current.style.height = 'auto';
+          titleTextareaRef.current.style.height = `${titleTextareaRef.current.scrollHeight}px`;
+      }
+  }, [title, activeTab]);
+
+  const handleImageScroll = () => {
+      if (imageScrollRef.current) {
+          const scrollLeft = imageScrollRef.current.scrollLeft;
+          const width = imageScrollRef.current.offsetWidth;
+          const index = Math.round(scrollLeft / width);
+          setCurrentImageIndex(index);
+      }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadWrapper = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files.length > 0 && onFileUpload) {
-           setIsUploading(true);
-           try {
-               const files = Array.from(e.target.files);
-               const newUrls = await onFileUpload(files);
-               if (newUrls && newUrls.length > 0) {
-                   onImagesChange([...images, ...newUrls]);
-                   showToast("上传成功");
-               }
-           } catch (error) { showToast("上传失败，请重试", "error"); } 
-           finally { setIsUploading(false); }
+          setIsImageUploading(true);
+          showToast("正在上传图片...", "info");
+          try {
+              const newUrls = await onFileUpload(Array.from(e.target.files));
+              let currentImages = [...images];
+              if (currentImages.length === 1 && currentImages[0] === DEFAULT_NOTE_IMAGE) {
+                  currentImages = [];
+              }
+              const finalImages = [...currentImages, ...newUrls];
+              onImagesChange(finalImages);
+              setTimeout(() => {
+                  if (imageScrollRef.current) {
+                      imageScrollRef.current.scrollTo({ left: imageScrollRef.current.scrollWidth, behavior: 'smooth' });
+                  }
+              }, 100);
+              showToast("图片上传成功");
+          } catch (err) {
+              showToast("图片上传失败", "error");
+          } finally {
+              setIsImageUploading(false);
+          }
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const toggleSelection = (id: string) => {
-      setSelectedIds(prev => {
-          const newSet = new Set(prev);
-          if (newSet.has(id)) newSet.delete(id);
-          else newSet.add(id);
-          return newSet;
-      });
+  const handleDeleteImage = (index: number) => {
+      const newImages = images.filter((_, i) => i !== index);
+      onImagesChange(newImages.length > 0 ? newImages : [DEFAULT_NOTE_IMAGE]);
+      if (index > 0) setCurrentImageIndex(index - 1);
+      showToast("图片已删除");
   };
 
-  const handleBatchPublishAction = async () => { /* ... Batch logic unchanged ... */ };
-  const handleBatchDelete = () => { /* ... Batch logic unchanged ... */ };
-  const selectAll = () => { /* ... Select all logic unchanged ... */ };
-  
-  const handleItemClick = (item: any, type: 'draft' | 'published') => {
-      if (isSelectionMode) { toggleSelection(item.id); return; }
-      const itemTitle = item.title || '';
-      const itemContent = 'content' in item ? item.content : itemTitle; 
-      // If it's a draft and has no images, don't generate random ones. Keep it empty.
-      const itemImages = type === 'draft' ? (item.images || []) : (item.imageUrls || []);
-      onContentChange(itemContent);
-      onImagesChange(itemImages);
-      setActiveTab('preview');
-      setIsCustomMode(false); // Reset mode on load
-      showToast("已加载笔记内容");
-  };
-
-  const renderGridItem = (item: any, type: 'draft' | 'published') => {
-      const isSelected = selectedIds.has(item.id);
-      
-      // Determine Cover Image
-      // For Published: always use coverImage
-      // For Draft: Prefer 'images' array (new), fallback to 'imageUrls' (legacy), else null
-      let cover = null;
-      if (type === 'published') {
-          cover = item.coverImage;
+  const handleItemClick = (item: any) => {
+      if (isSelectionMode) {
+          const idStr = String(item.id);
+          setSelectedIds(prev => { 
+              const n = new Set(prev); 
+              if(n.has(idStr)) n.delete(idStr); 
+              else n.add(idStr); 
+              return n; 
+          });
       } else {
-          if (item.images && item.images.length > 0) cover = item.images[0];
-          else if (item.imageUrls && item.imageUrls.length > 0) cover = item.imageUrls[0];
+          setActiveItemId(String(item.id));
+          setActiveTab('preview');
+      }
+  };
+
+  const handleBatchDelete = () => {
+      const ids: string[] = Array.from(selectedIds) as string[];
+      if (ids.length === 0) return;
+      
+      const publishedIds: string[] = [];
+      const draftIds: string[] = [];
+
+      ids.forEach((id: string) => {
+          const item = mergedItems.find((i: any) => String(i.id) === id);
+          if (item) {
+              if (item._type === 'published') publishedIds.push(id);
+              else draftIds.push(id);
+          }
+      });
+      
+      if (publishedIds.length > 0 && onDeletePublishedBatch) onDeletePublishedBatch(publishedIds);
+      if (draftIds.length > 0 && onDeleteDraftBatch) onDeleteDraftBatch(draftIds);
+      
+      setSelectedIds(new Set());
+      setIsSelectionMode(false);
+      showToast(`已删除 ${ids.length} 篇内容`);
+  };
+
+  const handleBatchArchive = () => {
+      const folderToUse = newFolderName.trim() || '默认分类';
+      const ids: string[] = Array.from(selectedIds) as string[];
+      let count = 0;
+      ids.forEach((id: string) => {
+          const item = mergedItems.find((i: any) => String(i.id) === id);
+          if (!item) return;
+          if (onSaveToLibrary && item._type === 'draft') {
+               onSaveToLibrary(item.title, item.content, 'note', String(item.id), folderToUse);
+               count++;
+          } else if (onSavePublished && item._type === 'published') {
+               const { _type, timestamp, ...recordData } = item;
+               onSavePublished({ ...recordData, folder: folderToUse });
+               count++;
+          }
+      });
+      if (count > 0) showToast(`已将 ${count} 篇笔记移动至 "${folderToUse}"`);
+      setSelectedIds(new Set());
+      setIsSelectionMode(false);
+      setShowArchiveModal(false);
+      setNewFolderName('');
+      setActiveFolder(folderToUse);
+  };
+
+  const downloadDataUrl = (dataUrl: string, filename: string) => {
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
+  const handleDownloadCard = async (record: PublishedRecord) => {
+      try {
+          const dataUrl = await generateShareCard(record, user?.username);
+          downloadDataUrl(dataUrl, `xhs-card-${record.title || 'note'}.png`);
+          return true;
+      } catch (e) {
+          console.error(e);
+          return false;
+      }
+  };
+
+  // 批量下载 - (自动补全二维码 + 自动清理草稿)
+  const handleBatchDownloadQRs = async () => {
+      const ids: string[] = Array.from(selectedIds) as string[];
+      if (ids.length === 0) return;
+
+      const selectedItems = mergedItems.filter(i => ids.includes(String(i.id)));
+      if (selectedItems.length === 0) { showToast("未选中任何笔记", "error"); return; }
+
+      setIsDownloading(true);
+      showToast(`正在生成 ${selectedItems.length} 张卡片...`, "info");
+
+      let successCount = 0;
+      
+      for (let i = 0; i < selectedItems.length; i++) {
+          const item = selectedItems[i];
+          let recordToUse: PublishedRecord | null = null;
+
+          try {
+              // A. 草稿 -> 自动转发布状态
+              if (item._type === 'draft') {
+                   const validImages = (item.images && item.images.length > 0) ? item.images : [DEFAULT_NOTE_IMAGE];
+                   const qrcode = await publishToXHS({ title: item.title, content: item.content || '', imageUrls: validImages });
+
+                   const newRecord: PublishedRecord = {
+                       id: `pub-${Date.now()}-${Math.random().toString(36).substr(2,5)}`,
+                       title: item.title, content: item.content, coverImage: validImages[0], imageUrls: validImages,
+                       qrCodeUrl: qrcode, publishedAt: Date.now(), folder: item.folder
+                   };
+
+                   if (onSavePublished) onSavePublished(newRecord);
+                   
+                   // 🟢 删除原草稿
+                   if (onDeleteDraft) onDeleteDraft(String(item.id)); 
+
+                   recordToUse = newRecord;
+              } 
+              // B. 已发布 -> 检查/补全二维码
+              else {
+                  let pubRecord = { ...item } as any;
+                  if (!pubRecord.qrCodeUrl) {
+                      const validImages = (pubRecord.imageUrls && pubRecord.imageUrls.length > 0) 
+                          ? pubRecord.imageUrls : (pubRecord.coverImage ? [pubRecord.coverImage] : [DEFAULT_NOTE_IMAGE]);
+                      const qrcode = await publishToXHS({ title: pubRecord.title, content: pubRecord.content || '', imageUrls: validImages });
+                      pubRecord.qrCodeUrl = qrcode;
+                      if (onSavePublished) {
+                          const { _type, timestamp, ...cleanRecord } = pubRecord;
+                          onSavePublished(cleanRecord as PublishedRecord);
+                      }
+                  }
+                  recordToUse = pubRecord as PublishedRecord;
+              }
+
+              if (recordToUse) {
+                  const success = await handleDownloadCard(recordToUse);
+                  if (success) successCount++;
+              }
+          } catch (e: any) {
+              console.error(`Failed: ${item.title}`, e);
+          }
+          await new Promise(r => setTimeout(r, 1000));
       }
       
-      return (
-          <div key={item.id} className="bg-white rounded-lg overflow-hidden shadow-sm break-inside-avoid mb-2 group relative border border-slate-100 touch-manipulation transform transition-all duration-200 active:scale-95 cursor-pointer" onClick={() => handleItemClick(item, type)}>
-              <div className="aspect-[3/4] relative bg-slate-50 flex items-center justify-center">
-                  {cover ? (
-                      <img src={cover} className="w-full h-full object-cover" loading="lazy" />
-                  ) : (
-                      <div className="flex flex-col items-center justify-center text-slate-300">
-                          <Type size={24} />
-                          <span className="text-[10px] font-bold mt-1">纯文本</span>
-                      </div>
-                  )}
-                  {isSelectionMode ? (
-                      <div className={`absolute top-2 right-2 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-rose-500 border-rose-500' : 'bg-black/20 border-white'}`}>
-                          {isSelected && <Check size={12} className="text-white" />}
-                      </div>
-                  ) : (
-                      <button onClick={(e) => { e.stopPropagation(); if (type === 'draft') onDeleteDraft?.(item.id); else onDeletePublished?.(item.id); }} className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all backdrop-blur-sm z-10 active:scale-75"><Trash2 size={12} /></button>
-                  )}
-                  {type === 'published' && item.qrCodeUrl && !isSelectionMode && (
-                      <div onClick={(e) => { e.stopPropagation(); setViewingQrCode({ qrcode: item.qrCodeUrl, title: item.title, cover: item.coverImage }); }} className="absolute bottom-2 right-2 bg-white/90 p-1.5 rounded-full shadow-sm hover:bg-white hover:scale-110 transition-all z-10 text-slate-800 hover:text-rose-500"><QrCode size={14} /></div>
-                  )}
-              </div>
-              <div className="p-2">
-                  <div className="font-bold text-xs text-slate-900 line-clamp-2 leading-snug mb-1.5 min-h-[2.25em]">{item.title || '无标题'}</div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-slate-200"/><span>{user?.username || '我'}</span></div>
-                      <span>{type === 'draft' ? <span className="text-amber-500 bg-amber-50 px-1 rounded">草稿</span> : <Heart size={10} className="text-slate-300"/>}</span>
-                  </div>
-              </div>
-          </div>
-      );
+      setIsDownloading(false);
+      setIsSelectionMode(false);
+      setSelectedIds(new Set());
+      showToast(`已生成 ${successCount} 张卡片，笔记已同步`);
   };
 
+  const handlePublish = async () => {
+      if (!title.trim()) return showToast("请填写标题", 'error');
+      
+      // 🟢 核心修改：发布时不先自动存草稿，防止产生重复草稿记录
+      // onSaveToLibrary(...) REMOVED
+      
+      setIsPublishing(true);
+      
+      // Generate ID for new published record
+      const newId = activeItemId?.startsWith('draft') ? `pub-${Date.now()}` : (activeItemId || `pub-${Date.now()}`);
+      
+      const optimisticRecord: PublishedRecord = {
+          id: newId, title, content: safeContent, 
+          coverImage: images.length > 0 ? images[0] : DEFAULT_NOTE_IMAGE, 
+          imageUrls: images.length > 0 ? images : [DEFAULT_NOTE_IMAGE],
+          qrCodeUrl: '', publishedAt: Date.now(), folder: activeFolder !== '全部' ? activeFolder : undefined
+      };
+      
+      onSavePublished?.(optimisticRecord);
+      
+      try {
+          const finalImages = images.length > 0 ? images : [DEFAULT_NOTE_IMAGE];
+          const qrcode = await publishToXHS({ title, content: safeContent, imageUrls: finalImages });
+          const finalRecord: PublishedRecord = { ...optimisticRecord, qrCodeUrl: qrcode };
+          
+          onSavePublished?.(finalRecord);
+          
+          // 🟢 核心修改：如果是从草稿发布的，发布成功后直接删除原草稿
+          // Determine if active item is currently a draft
+          const isDraft = drafts.some(d => String(d.id) === String(activeItemId));
+          if (activeItemId && isDraft && onDeleteDraft) {
+              onDeleteDraft(activeItemId);
+          }
+          
+          setActiveItemId(newId);
+          setShowQrModal(finalRecord);
+          setActiveTab('all'); 
+          showToast("发布成功");
+      } catch (e: any) { 
+          // If fail, delete the optimistic published record
+          onDeletePublished?.(newId);
+          showToast(`发布失败: ${e.message}`, 'error'); 
+      } finally { setIsPublishing(false); }
+  };
+
+  const safeImages = images.length > 0 ? images : [DEFAULT_NOTE_IMAGE];
+  const handleNewNoteWrapper = () => { if (onNewNote) { onNewNote(); setActiveTab('preview'); } };
+  const extractBody = (fullContent: string) => fullContent.includes('\n') ? fullContent.substring(fullContent.indexOf('\n') + 1) : '';
+  const titleCount = getCharacterCount(title);
+  const bodyCount = getCharacterCount(fullBody);
+
   return (
-    <>
-    {viewingQrCode && (
-        <div className="fixed inset-0 z-[9999] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in" onClick={() => setViewingQrCode(null)}>
-            <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-2xl overflow-hidden relative transform transition-all scale-100" onClick={e => e.stopPropagation()}>
-                <div className="h-32 bg-gradient-to-br from-rose-500 to-orange-400 relative p-6 flex flex-col justify-between">
-                    <div className="flex justify-between items-start">
-                        <div className="w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white"><Check size={20} strokeWidth={3} /></div>
-                        <button onClick={() => setViewingQrCode(null)} className="text-white/70 hover:text-white transition-colors bg-black/10 rounded-full p-1"><X size={20}/></button>
-                    </div>
-                    <h2 className="text-2xl font-bold text-white tracking-tight">发布准备就绪</h2>
-                </div>
-                <div className="px-6 pb-8 -mt-6">
-                    <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-5 flex flex-col items-center">
-                        <div className="w-full aspect-[4/3] rounded-xl overflow-hidden mb-4 relative bg-slate-100">
-                             <img src={viewingQrCode.cover} className="w-full h-full object-cover" />
-                             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end p-3"><p className="text-white text-xs font-bold line-clamp-1">{viewingQrCode.title}</p></div>
-                        </div>
-                        <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200 mb-4"><QRCodeDisplay value={viewingQrCode.qrcode} size={180} /></div>
-                        <p className="text-xs text-slate-500 text-center font-medium leading-relaxed">请使用 <span className="text-rose-500 font-bold">小红书 App</span> 扫码<br/>确认预览效果并完成发布</p>
-                    </div>
-                    <button onClick={() => setViewingQrCode(null)} className="mt-6 w-full py-3.5 bg-slate-900 text-white rounded-xl font-bold text-sm shadow-xl active:scale-95 transition-transform hover:bg-black">我知道了</button>
-                </div>
-            </div>
-        </div>
-    )}
-
-    <div className="w-full h-full flex flex-col bg-slate-50 relative overflow-hidden lg:rounded-[3rem] lg:border-[8px] lg:border-slate-900 lg:shadow-2xl lg:max-w-[375px] lg:max-h-[812px]">
+    <div className="w-full h-full flex flex-col bg-white relative overflow-hidden lg:rounded-[3rem] lg:border-[8px] lg:border-slate-900 lg:shadow-2xl lg:max-w-[375px] lg:max-h-[812px] font-sans selection:bg-rose-100 selection:text-rose-900">
         {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
-        {croppingImg && <InteractiveCropper imgUrl={croppingImg.url} onCancel={() => setCroppingImg(null)} onSave={(newUrl) => { const newImages = [...images]; newImages[croppingImg.index] = newUrl; onImagesChange(newImages); setCroppingImg(null); }} />}
-
-        <div className="h-12 bg-white flex justify-between items-end px-6 pb-2 shrink-0 z-10 select-none">
-            <div className="text-sm font-bold text-slate-900">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-            <div className="flex gap-1.5 text-slate-900"><Signal size={14} fill="currentColor"/><Wifi size={14} /><Battery size={14} fill="currentColor"/></div>
+        
+        {/* Status Bar */}
+        <div className="h-11 flex justify-between items-end px-6 pb-2 shrink-0 bg-white z-50">
+            <div className="text-[15px] font-semibold text-black tracking-tight">09:41</div>
+            <div className="flex gap-1.5 text-black items-center"><Signal size={16} strokeWidth={2.5}/><Wifi size={16} strokeWidth={2.5}/><Battery size={20} strokeWidth={2.5}/></div>
         </div>
 
-        <div className="flex px-1 pt-2 bg-white border-b border-slate-100 shrink-0 z-20 overflow-x-auto no-scrollbar">
-             <button onClick={() => { setActiveTab('preview'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'preview' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>预览编辑</button>
-             <button onClick={() => { setActiveTab('all'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'all' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>全部</button>
-             <button onClick={() => { setActiveTab('drafts'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'drafts' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>草稿</button>
-             <button onClick={() => { setActiveTab('published'); setIsSelectionMode(false); }} className={`flex-1 pb-3 text-[11px] font-bold transition-all whitespace-nowrap px-3 active:scale-95 ${activeTab === 'published' ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-400'}`}>已发布</button>
-        </div>
+        <div className="flex-1 overflow-y-auto no-scrollbar bg-white relative">
+            {activeTab === 'preview' ? (
+                <div className="flex flex-col animate-fade-in min-h-full pb-[60px] relative">
+                    {/* Header: Preview Mode - Optimized to match XHS Detail View */}
+                    <div className="h-11 flex items-center justify-between px-3 sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-50/50">
+                        <ChevronLeft size={28} className="text-[#333] cursor-pointer hover:text-slate-600 transition-colors" strokeWidth={1.5} onClick={() => setActiveTab('all')} />
+                        <div className="flex items-center gap-2 mr-auto ml-2">
+                             <img src={user?.avatar || "https://api.dicebear.com/7.x/notionists/svg?seed=creator"} className="w-8 h-8 rounded-full object-cover border border-slate-100"/>
+                             <div className="flex flex-col justify-center">
+                                 <span className="text-[12px] font-bold text-[#333] truncate max-w-[80px] leading-tight">{user?.username || "创作者"}</span>
+                                 <span className="text-[9px] text-slate-400 leading-tight">发布于 上海</span>
+                             </div>
+                             <button className="bg-rose-50 text-[#ff2442] text-[10px] font-bold px-2.5 py-1 rounded-full ml-1">关注</button>
+                        </div>
+                        <div className="flex gap-2 text-[#333] items-center">
+                            <button onClick={() => onSaveToLibrary(title, safeContent, 'note', activeItemId || undefined, activeFolder !== '全部' ? activeFolder : undefined)} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><Save size={20} strokeWidth={1.5}/></button>
+                            <button className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><Share2 size={20} strokeWidth={1.5} /></button>
+                        </div>
+                    </div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar bg-[#F8F8F8] relative">
-            {activeTab === 'preview' && (
-                <div className="min-h-full pb-32">
-                    <div className="aspect-[3/4] bg-white relative group overflow-hidden flex items-center justify-center bg-slate-100">
-                        {images.length > 0 ? (
-                            <>
-                                <div ref={carouselRef} className={`w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar ${isDragScroll ? 'cursor-grabbing' : 'cursor-grab'}`} onMouseDown={handleDragStart} onMouseMove={handleDragMove} onMouseUp={handleDragEnd} onMouseLeave={handleDragEnd} onTouchStart={handleDragStart} onTouchMove={handleDragMove} onTouchEnd={handleDragEnd}>
-                                    {images.map((img, idx) => (
-                                        <div key={idx} className="w-full h-full shrink-0 snap-center relative flex items-center justify-center bg-slate-100 group/img select-none">
-                                            <img src={img} className="w-full h-full object-cover pointer-events-none select-none" draggable={false} /> 
-                                            <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-100 lg:opacity-0 lg:group-hover/img:opacity-100 transition-opacity z-20 pointer-events-auto">
-                                                 <button onClick={(e) => { e.stopPropagation(); setCroppingImg({url: img, index: idx}); }} className="p-2 bg-black/50 text-white rounded-full backdrop-blur-sm hover:bg-black/70 active:scale-90 transition-transform"><Crop size={14}/></button>
-                                                 <button onClick={(e) => { e.stopPropagation(); onImagesChange(images.filter((_, i) => i !== idx)); }} className="p-2 bg-red-500/80 text-white rounded-full backdrop-blur-sm hover:bg-red-600 active:scale-90 transition-transform"><Trash2 size={14}/></button>
-                                            </div>
-                                            <div className="absolute bottom-3 left-3 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-sm font-bold pointer-events-none">{idx + 1}/{images.length}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="absolute bottom-4 right-4 z-20 pointer-events-none">
-                                     <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-white text-slate-900 rounded-full shadow-lg pointer-events-auto hover:scale-105 active:scale-95 transition-transform"><Plus size={20}/></button>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="w-full h-full relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                                <img src={currentPlaceholder} className="w-full h-full object-cover opacity-80 pointer-events-none" />
-                                <div className="absolute inset-0 bg-black/10 flex flex-col items-center justify-center text-white backdrop-blur-[2px] transition-all group-hover:backdrop-blur-none group-hover:bg-black/20">
-                                    <div className="bg-black/30 p-3 rounded-full mb-2 backdrop-blur-md"><Plus size={24} className="text-white" /></div>
-                                    <span className="text-xs font-bold drop-shadow-md opacity-80">点击上传封面</span>
-                                </div>
+                    {/* Image Carousel */}
+                    <div className="w-full relative aspect-[3/4] bg-slate-50 group">
+                        {isImageUploading && (
+                            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm z-20 flex flex-col items-center justify-center text-white animate-fade-in">
+                                <Loader2 size={32} className="animate-spin mb-2"/>
+                                <span className="text-xs font-bold">上传处理中...</span>
                             </div>
                         )}
-                        {isUploading && <div className="absolute inset-0 z-30 bg-black/60 flex flex-col items-center justify-center text-white backdrop-blur-sm animate-fade-in"><Loader2 size={32} className="animate-spin mb-2 text-rose-500" /><span className="text-xs font-bold">图片正在上传中...</span></div>}
-                        <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
-                    </div>
-
-                    <div className="p-5 bg-white min-h-[400px] flex flex-col">
-                        <div className="relative mb-3 shrink-0">
-                            <input value={title} onChange={handleTitleChange} className="w-full text-lg font-bold text-slate-900 border-none outline-none placeholder:text-slate-300 bg-transparent pr-12" placeholder="填写标题..." />
-                            <div className={`absolute top-1/2 -translate-y-1/2 right-0 text-[10px] font-bold ${isTitleOver ? 'text-red-500' : 'text-slate-300'}`}>{titleLen}/20</div>
-                        </div>
-                        
-                        <div className="relative flex-1">
-                            <textarea 
-                                value={displayBody} 
-                                onChange={handleBodyChange}
-                                className="w-full min-h-[320px] text-sm text-slate-700 leading-relaxed border-none outline-none resize-none placeholder:text-slate-300 bg-transparent pb-8"
-                                placeholder="添加正文..."
-                            />
-                            
-                            {/* Normal Mode Tag Display */}
-                            {!isCustomMode && (
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                    {(safeContent.match(/#[^\s#]+/g) || []).map((tag, i) => (
-                                        <span key={i} className="text-blue-600 text-xs font-medium">{tag.replace(/\[话题\]|#话题/g, '')}</span>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Unified Custom Footer & Tags UI */}
-                            <div className="mt-6 pt-4 border-t border-slate-100">
-                                <div className="flex items-center justify-between mb-3">
-                                    <div className="flex items-center gap-2 cursor-pointer" onClick={toggleCustomMode}>
-                                        {isCustomMode ? <CheckSquare size={16} className="text-rose-500"/> : <Square size={16} className="text-slate-300"/>}
-                                        <span className="text-xs font-bold text-slate-500 select-none">自定义结尾 & 话题</span>
-                                    </div>
-                                    {isCustomMode && (
-                                        <div className="flex gap-2">
-                                            <button onClick={() => setIsSavingTemplate(true)} className="text-[10px] text-slate-400 hover:text-rose-500 flex items-center gap-1"><Save size={12}/> 存模板</button>
-                                            <div className="relative group/tpl">
-                                                <button className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-1"><LayoutTemplate size={12}/> 载入</button>
-                                                <div className="absolute bottom-full right-0 mb-2 w-32 bg-white rounded-lg shadow-xl border border-slate-100 hidden group-hover/tpl:block p-1">
-                                                    {footerTemplates.length === 0 && <div className="text-[10px] text-slate-300 text-center py-2">无模板</div>}
-                                                    {footerTemplates.map(t => (
-                                                        <div key={t.id} className="flex items-center justify-between p-1.5 hover:bg-slate-50 rounded cursor-pointer group/item" onClick={() => setCustomFooter(t.content)}>
-                                                            <span className="text-[10px] text-slate-600 truncate max-w-[80px]">{t.name}</span>
-                                                            <button onClick={(e) => {e.stopPropagation(); deleteTemplate(t.id);}} className="text-slate-300 hover:text-red-500 opacity-0 group-hover/item:opacity-100"><X size={10}/></button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
+                        <div ref={imageScrollRef} className="w-full h-full flex overflow-x-auto snap-x snap-mandatory no-scrollbar" onScroll={handleImageScroll}>
+                            {safeImages.map((img, idx) => (
+                                <div key={idx} className="w-full h-full shrink-0 snap-center relative">
+                                    <img src={img} className="w-full h-full object-cover" />
+                                    {images.length > 0 && (
+                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteImage(idx); }} className="absolute top-3 right-3 p-2 bg-black/40 text-white rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all active:scale-90 hover:bg-red-500/80 z-20"><Trash2 size={16}/></button>
                                     )}
                                 </div>
-                                
-                                {isCustomMode && (
-                                    <div className="space-y-3 animate-fade-in bg-slate-50 p-3 rounded-xl border border-slate-100 relative">
-                                        {isSavingTemplate ? (
-                                            <div className="flex gap-2 items-center">
-                                                <input value={newTemplateName} onChange={e => setNewTemplateName(e.target.value)} placeholder="输入模板名称..." className="flex-1 text-xs p-2 rounded border border-slate-200" autoFocus />
-                                                <button onClick={saveTemplate} className="text-xs font-bold text-white bg-rose-500 px-3 py-2 rounded">保存</button>
-                                                <button onClick={() => setIsSavingTemplate(false)} className="text-xs text-slate-500 px-2">取消</button>
+                            ))}
+                        </div>
+                        <div onClick={() => fileInputRef.current?.click()} className="absolute bottom-4 left-4 flex items-center justify-center transition-opacity cursor-pointer z-10 hover:scale-105 active:scale-95">
+                            <div className="bg-black/40 backdrop-blur px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg text-white/90 border border-white/10">
+                                {isImageUploading ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>}
+                                <span className="text-[10px] font-bold">配图 ({images.length})</span>
+                            </div>
+                        </div>
+                        <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleUploadWrapper} />
+                        {safeImages.length > 1 && (
+                            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+                                {safeImages.map((_, i) => <div key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${i === currentImageIndex ? 'bg-[#ff2442]' : 'bg-white/50'}`}/>)}
+                            </div>
+                        )}
+                        <div className="absolute top-3 right-3 bg-black/30 backdrop-blur px-2 py-0.5 rounded-full text-[10px] text-white font-medium opacity-80">{currentImageIndex + 1}/{safeImages.length}</div>
+                    </div>
+
+                    {/* Content Body */}
+                    <div className="px-4 py-4 space-y-2 min-h-[400px]">
+                        <div className="relative mb-2">
+                            {/* 🟢 优化：使用 Textarea 实现标题自动换行，不再截断 */}
+                            <textarea
+                                ref={titleTextareaRef}
+                                value={title}
+                                onChange={(e) => {
+                                    // 模拟单行输入习惯，回车即换行到正文
+                                    const newTitle = e.target.value.replace(/\n/g, ' '); 
+                                    onContentChange(`${newTitle}\n${fullBody}`);
+                                }}
+                                className="w-full text-[16px] font-bold text-[#333] border-none outline-none bg-transparent placeholder:text-slate-300 leading-normal pr-12 resize-none overflow-hidden block"
+                                placeholder="填写标题会有更多赞哦~"
+                                rows={1}
+                            />
+                            <div className={`absolute right-0 top-1.5 text-[10px] font-mono ${titleCount > 20 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{titleCount}/20</div>
+                        </div>
+                        <div className="relative">
+                            <textarea value={fullBody} onChange={(e) => onContentChange(`${title}\n${e.target.value}`)} className="w-full text-[14px] leading-relaxed text-[#333] border-none outline-none resize-none bg-transparent placeholder:text-slate-300 min-h-[400px]" placeholder="添加正文" />
+                            <div className={`text-right text-[10px] font-mono mt-1 ${bodyCount > 1000 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{bodyCount}/1000</div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-50">
+                            <button className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 rounded-full text-[12px] text-slate-600 font-medium active:scale-95 transition-transform"><Plus size={12}/> 话题</button>
+                            <button className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 rounded-full text-[12px] text-slate-600 font-medium active:scale-95 transition-transform"><MapPin size={12}/> {user?.location || '添加地点'}</button>
+                            <button className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 rounded-full text-[12px] text-slate-600 font-medium active:scale-95 transition-transform"><Lock size={12}/> 公开可见</button>
+                        </div>
+                        <div className="text-[10px] text-slate-300 mt-2 text-center">{new Date().toLocaleDateString()}</div>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex flex-col min-h-full">
+                    {/* List Header */}
+                    <div className="bg-white px-5 pt-4 pb-2 sticky top-0 z-40 border-b border-slate-50 shadow-sm">
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="flex-1 relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索笔记..." className="w-full bg-slate-100 text-xs rounded-full pl-9 pr-4 py-2 outline-none focus:ring-2 focus:ring-slate-200 transition-all placeholder:text-slate-400 text-slate-700"/>
+                            </div>
+                            <button onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds(new Set()); }} className={`p-2 rounded-full transition-colors ${isSelectionMode ? 'bg-[#ff2442] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                {isSelectionMode ? <Check size={16}/> : <CheckSquare size={16}/>}
+                            </button>
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                             {folders.map(f => (
+                                 <button key={f} onClick={() => setActiveFolder(f)} className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all border whitespace-nowrap ${activeFolder === f ? 'bg-[#333] border-[#333] text-white' : 'bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100'}`}>{f}</button>
+                             ))}
+                        </div>
+                    </div>
+
+                    {/* Masonry Grid */}
+                    <div className="p-2 columns-2 gap-2 space-y-2 pb-24">
+                        {displayItems.length === 0 && <div className="col-span-2 pt-20 text-center text-slate-400 flex flex-col items-center"><FolderPlus size={32} className="mb-2 opacity-50"/><span className="text-xs">暂无笔记</span></div>}
+                        {displayItems.map((item: any) => {
+                            const isSelected = selectedIds.has(String(item.id));
+                            const cover = item.coverImage || (item.images?.[0] || DEFAULT_NOTE_IMAGE);
+                            const itemTitleCount = getCharacterCount(item.title || '');
+                            const itemBodyRaw = extractBody(item.content || '');
+                            const itemBodyCount = getCharacterCount(itemBodyRaw);
+
+                            return (
+                                <div key={String(item.id)} className={`bg-white rounded-xl overflow-hidden shadow-sm break-inside-avoid relative border border-slate-100 transition-all ${isSelectionMode ? 'ring-2 ring-transparent' : 'active:scale-[0.98]'}`} onClick={() => handleItemClick(item)}>
+                                    <div className="aspect-[3/4] relative group">
+                                        <img src={cover} className="w-full h-full object-cover" />
+                                        {item._type === 'published' ? <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[8px] font-bold text-white backdrop-blur-md shadow-sm bg-[#ff2442]/90">已发布</div> : <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[8px] font-bold text-slate-600 backdrop-blur-md shadow-sm bg-white/90 border border-slate-100">草稿</div>}
+                                        {item._type === 'published' && !isSelectionMode && (
+                                            <div className="absolute bottom-0 right-0 p-1.5 bg-black/30 backdrop-blur-sm rounded-tl-xl cursor-pointer hover:bg-rose-500/80 transition-colors z-20" onClick={(e) => { e.stopPropagation(); if (item.qrCodeUrl) setShowQrModal(item); }}>
+                                                {item.qrCodeUrl ? <QrCode size={12} className="text-white"/> : <Loader2 size={12} className="animate-spin text-white"/>}
                                             </div>
-                                        ) : (
-                                            <div>
-                                                <label className="text-[10px] font-bold text-slate-400 mb-1 block flex items-center gap-1"><Hash size={10}/> 自定义结尾 (含话题)</label>
-                                                <textarea 
-                                                    value={customFooter} 
-                                                    onChange={handleFooterChange}
-                                                    placeholder="在这里粘贴你的固定结尾，例如：\n\n关注我看更多干货！\n#OOTD #每日穿搭 #小红书爆款" 
-                                                    className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 outline-none focus:border-rose-300 min-h-[80px] resize-none"
-                                                />
-                                                {/* Auto-detected tags feedback */}
-                                                {detectedTagsInFooter.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1 mt-2">
-                                                        {detectedTagsInFooter.map((tag, i) => (
-                                                            <span key={i} className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{tag}</span>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                        )}
+                                        {isSelectionMode && (
+                                            <div className={`absolute inset-0 bg-white/10 z-30 flex justify-end p-2`}>
+                                                <div className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center transition-all shadow-sm ${isSelected ? 'bg-[#ff2442] border-[#ff2442]' : 'bg-black/20 border-white backdrop-blur-sm'}`}>
+                                                    {isSelected && <Check size={12} className="text-white" strokeWidth={3} />}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {(activeTab === 'drafts' || activeTab === 'published' || activeTab === 'all') && (
-                <div className="pb-20">
-                     {activeTab === 'all' ? (
-                        <div>
-                             {Object.entries(groupedItems).map(([category, items]: [string, any[]]) => (
-                                <div key={category} className="mb-2">
-                                    <div onClick={() => toggleCategory(category)} className="sticky top-0 z-10 bg-[#F8F8F8]/95 backdrop-blur-sm px-4 py-3 flex justify-between items-center cursor-pointer border-b border-slate-100">
-                                        <div className="font-bold text-xs text-slate-600 flex items-center gap-2">{expandedCategories.has(category) ? <FolderOpen size={14} className="text-rose-500"/> : <Folder size={14} className="text-slate-400"/>} {category} <span className="bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-md text-[9px]">{items.length}</span></div>
-                                        <ChevronRight size={14} className={`text-slate-400 transition-transform ${expandedCategories.has(category) ? 'rotate-90' : ''}`} />
+                                    <div className="p-2.5">
+                                        <div className="text-[13px] font-bold text-[#333] line-clamp-2 leading-tight mb-1 min-h-[18px]">{item.title || '未命名'}</div>
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-[9px] text-slate-400 font-mono bg-slate-50 px-1 rounded">标题: {itemTitleCount}</span>
+                                            <span className="text-[9px] text-slate-400 font-mono bg-slate-50 px-1 rounded">正文: {itemBodyCount}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between border-t border-slate-50 pt-2">
+                                            <div className="flex items-center gap-1">
+                                                <div className="w-4 h-4 rounded-full bg-slate-200 overflow-hidden shrink-0"><img src={user?.avatar} className="w-full h-full object-cover"/></div>
+                                                <span className="text-[10px] text-slate-400 scale-90 origin-left truncate max-w-[60px]">{user?.username}</span>
+                                            </div>
+                                            <div className="flex items-center gap-0.5 text-slate-400"><Heart size={10} /><span className="text-[10px]">0</span></div>
+                                        </div>
                                     </div>
-                                    {expandedCategories.has(category) && <div className="p-2 columns-2 gap-2 space-y-2 animate-fade-in">{items.map(item => renderGridItem(item, item._type))}</div>}
                                 </div>
-                            ))}
-                            {Object.keys(groupedItems).length === 0 && <div className="text-center py-20 text-slate-400 text-xs">暂无任何记录</div>}
-                        </div>
-                     ) : (
-                        <div className="p-2 columns-2 gap-2 space-y-2">
-                            {((activeTab === 'drafts' ? drafts : publishedHistory) || []).map(item => renderGridItem(item, activeTab === 'drafts' ? 'draft' : 'published'))}
-                            {((activeTab === 'drafts' ? drafts : publishedHistory) || []).length === 0 && <div className="text-center py-20 text-slate-400 text-xs w-full col-span-2">暂无数据</div>}
-                        </div>
-                     )}
+                            );
+                        })}
+                    </div>
                 </div>
             )}
         </div>
 
+        {/* Floating Actions & Toolbars */}
         {activeTab === 'preview' && (
-            <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-3 px-5 flex items-center justify-between z-20 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-                 <div className="flex items-center gap-4 text-slate-400">
-                     <div className={`text-[10px] font-bold px-2 py-1 rounded-full ${bodyLen > 1000 ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500'}`}>{bodyLen} / {targetWordCount}</div>
-                 </div>
-                 <div className="flex items-center gap-2">
-                     <button onClick={() => onSaveToLibrary(title || '未命名', safeContent, 'note')} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-full text-xs font-bold active:scale-95 transition-transform hover:bg-slate-200">存草稿</button>
-                     <button onClick={handlePublish} disabled={isPublishing} className="px-6 py-2 bg-rose-500 text-white rounded-full text-xs font-bold shadow-lg shadow-rose-200 active:scale-95 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition-transform hover:bg-rose-600">{isPublishing ? <Loader2 size={14} className="animate-spin"/> : <ArrowRight size={14}/>} 发布</button>
-                 </div>
+            <div className="absolute bottom-0 left-0 right-0 h-[52px] bg-white border-t border-slate-100 flex items-center px-4 justify-between z-50">
+                <div className="flex-1 bg-slate-100 h-9 rounded-full px-4 flex items-center text-slate-400 text-xs mr-4"><span className="truncate">说点什么...</span></div>
+                <div className="flex items-center gap-5 text-[#333]">
+                    <div className="flex flex-col items-center gap-0.5"><Heart size={20} strokeWidth={1.5} /><span className="text-[10px] font-medium">0</span></div>
+                    <div className="flex flex-col items-center gap-0.5"><Star size={20} strokeWidth={1.5} /><span className="text-[10px] font-medium">0</span></div>
+                    <div className="flex flex-col items-center gap-0.5"><MessageCircle size={20} strokeWidth={1.5} /><span className="text-[10px] font-medium">0</span></div>
+                </div>
             </div>
         )}
 
-        {activeTab !== 'preview' && (
-            <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-100 p-3 px-4 z-20 shadow-lg flex items-center gap-3">
-                {isSelectionMode ? (
-                    <>
-                        <button onClick={() => { setIsSelectionMode(false); setSelectedIds(new Set()); }} className="px-3 py-2 text-slate-500 text-xs font-bold bg-slate-100 rounded-lg whitespace-nowrap active:scale-95 transition-transform">取消</button>
-                        <button onClick={selectAll} className="px-3 py-2 text-blue-600 text-xs font-bold bg-blue-50 hover:bg-blue-100 rounded-lg whitespace-nowrap active:scale-95 transition-transform">全选</button>
-                        <div className="flex-1 flex gap-2 justify-end overflow-x-auto no-scrollbar">
-                            <button onClick={handleBatchDelete} disabled={selectedIds.size === 0} className="px-3 py-2 bg-red-50 text-red-500 rounded-lg text-xs font-bold active:scale-95 disabled:opacity-50 whitespace-nowrap transition-transform hover:bg-red-100">删除</button>
-                            <button onClick={handleBatchPublishAction} disabled={selectedIds.size === 0} className="px-3 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold active:scale-95 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap transition-transform hover:bg-black"><LinkIcon size={14}/> 生成链接</button>
+        {activeTab === 'preview' && !activePublishedRecord && (
+            <div className="absolute bottom-[65px] right-4 flex flex-col gap-3 z-50 items-end animate-fade-in">
+                <button onClick={handlePublish} disabled={isPublishing} className="h-9 px-4 bg-[#ff2442] text-white rounded-full shadow-lg flex items-center justify-center gap-1.5 active:scale-90 transition-transform disabled:opacity-50 font-bold text-xs shadow-rose-200/50">
+                    {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} 发布笔记
+                </button>
+            </div>
+        )}
+
+        {/* ... (rest of the component logic for SelectionMode, Tabs, etc. remains unchanged) ... */}
+        {isSelectionMode && activeTab !== 'preview' && (
+            <div className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-slate-100 z-50 animate-fade-in pb-6 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+                <div className="flex gap-2">
+                    <button onClick={() => setShowArchiveModal(true)} disabled={selectedIds.size === 0} className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 disabled:bg-slate-300 disabled:text-white"><FolderPlus size={14}/> 归档</button>
+                    <button onClick={handleBatchDownloadQRs} disabled={selectedIds.size === 0 || isDownloading} className="flex-1 h-10 bg-slate-100 text-slate-900 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 disabled:text-slate-400">
+                        {isDownloading ? <Loader2 size={14} className="animate-spin"/> : <QrCode size={14}/>} 批量二维码
+                    </button>
+                    <button onClick={handleBatchDelete} disabled={selectedIds.size === 0} className="w-12 h-10 bg-red-50 text-red-500 rounded-lg flex items-center justify-center active:scale-95 disabled:bg-slate-50 disabled:text-slate-300"><Trash2 size={16}/></button>
+                </div>
+            </div>
+        )}
+
+        {activeTab !== 'preview' && !isSelectionMode && (
+            <div className="h-[50px] shrink-0 bg-white border-t border-slate-50 px-6 flex items-center justify-around z-40 pb-1">
+                <div className="flex flex-col items-center gap-0.5 text-[#333] font-bold"><div className="text-[14px]">首页</div><div className="w-4 h-0.5 bg-transparent"/></div>
+                <div className="flex flex-col items-center gap-0.5 text-slate-400 font-medium"><div className="text-[14px]">视频</div></div>
+                <div onClick={handleNewNoteWrapper} className="w-10 h-7 bg-[#ff2442] rounded-[8px] flex items-center justify-center text-white shadow-md active:scale-90 transition-transform cursor-pointer"><Plus size={20} strokeWidth={3}/></div>
+                <div className="flex flex-col items-center gap-0.5 text-slate-400 font-medium"><div className="text-[14px]">消息</div></div>
+                <div className="flex flex-col items-center gap-0.5 text-slate-400 font-medium"><div className="text-[14px]">我</div></div>
+            </div>
+        )}
+
+        {showArchiveModal && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+                <div className="bg-white rounded-[24px] w-full max-w-xs p-6 shadow-2xl animate-fade-in relative">
+                    <h3 className="text-base font-bold text-slate-900 mb-4 text-center">移动到分类</h3>
+                    <div className="flex flex-wrap gap-2 mb-4 justify-center">
+                        {folders.filter(f => f !== '全部').map(f => (
+                            <button key={f} onClick={() => setNewFolderName(f)} className="px-3 py-1 bg-slate-100 rounded-full text-xs text-slate-600 hover:bg-slate-200">{f}</button>
+                        ))}
+                    </div>
+                    <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="输入或新建分类名称..." className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl outline-none text-sm font-bold focus:ring-2 focus:ring-[#ff2442]/10 mb-4 text-center" autoFocus />
+                    <div className="flex gap-2">
+                        <button onClick={() => setShowArchiveModal(false)} className="flex-1 h-10 bg-slate-100 text-slate-500 rounded-lg font-bold text-xs">取消</button>
+                        <button onClick={handleBatchArchive} className="flex-1 h-10 bg-[#ff2442] text-white rounded-lg font-bold text-xs shadow-lg shadow-rose-200">确认移动</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* 🟢 全新设计的二维码预览 Modal (极简高级感) */}
+        {showQrModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-xl animate-fade-in" onClick={() => setShowQrModal(null)}>
+                <div className="relative w-full max-w-[340px] flex flex-col gap-6" onClick={e => e.stopPropagation()}>
+                    
+                    {/* 卡片主体 */}
+                    <div className="bg-white rounded-[32px] overflow-hidden shadow-2xl shadow-black/20 ring-1 ring-white/20 transition-all duration-300 hover:scale-[1.02]">
+                        <div className="relative aspect-[3/4] w-full bg-slate-50 group">
+                             <img src={showQrModal.coverImage || showQrModal.imageUrls?.[0]} className="w-full h-full object-cover" />
+                             
+                             {/* 渐变遮罩 */}
+                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60"></div>
+                             
+                             {/* 底部悬浮信息 */}
+                             <div className="absolute bottom-0 left-0 right-0 p-6 flex flex-col justify-end h-full">
+                                <div className="text-white">
+                                    <h3 className="text-[20px] font-bold leading-snug line-clamp-2 mb-2 drop-shadow-md">{showQrModal.title || '笔记分享'}</h3>
+                                    <div className="flex items-center gap-2 opacity-90">
+                                        <div className="w-5 h-5 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                                            <div className="w-2.5 h-2.5 bg-[#ff2442] rounded-full shadow-sm"></div>
+                                        </div>
+                                        <span className="text-xs font-medium tracking-wide">小红书 App</span>
+                                    </div>
+                                </div>
+                             </div>
+
+                             {/* 二维码悬浮窗 (右上角) */}
+                             <div className="absolute top-4 right-4 w-16 h-16 bg-white/90 backdrop-blur-md rounded-xl p-1.5 shadow-lg border border-white/50">
+                                 {showQrModal.qrCodeUrl ? (
+                                     <img src={showQrModal.qrCodeUrl} className="w-full h-full object-contain mix-blend-multiply opacity-90"/>
+                                 ) : (
+                                     <QrCode className="w-full h-full text-slate-300 p-1"/>
+                                 )}
+                             </div>
                         </div>
-                    </>
-                ) : (
-                    <button onClick={() => setIsSelectionMode(true)} className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-colors active:scale-95">批量管理</button>
-                )}
+                    </div>
+
+                    {/* 底部操作栏 */}
+                    <div className="flex flex-col gap-3">
+                        <button 
+                            onClick={() => handleDownloadCard(showQrModal).then(s => s && showToast('已保存到相册'))} 
+                            className="w-full py-4 bg-white text-slate-900 rounded-full font-bold text-sm shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-slate-50"
+                        >
+                            <DownloadCloud size={18} className="text-slate-900"/> 保存分享卡片
+                        </button>
+                        <button 
+                            onClick={() => setShowQrModal(null)} 
+                            className="w-full py-4 bg-transparent text-white/70 hover:text-white rounded-full font-bold text-sm border border-white/20 hover:bg-white/10 active:scale-95 transition-all backdrop-blur-sm"
+                        >
+                            关闭
+                        </button>
+                    </div>
+                </div>
             </div>
         )}
     </div>
-    </>
   );
 };
 
-export default MobilePreview;
+export default memo(MobilePreview);

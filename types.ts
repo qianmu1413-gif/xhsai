@@ -106,7 +106,8 @@ export interface NoteDraft {
   title: string;
   content: string;
   personaName: string; 
-  images?: string[]; // Added: Store draft images
+  folder?: string; // Added: Folder name for organization
+  images?: string[]; 
   createdAt: number;
   isDeleted?: boolean;
 }
@@ -114,9 +115,11 @@ export interface NoteDraft {
 export interface PublishedRecord {
   id: string;
   title: string;
+  content?: string; 
   coverImage: string; 
   imageUrls: string[]; 
   qrCodeUrl: string; 
+  folder?: string; // Added: Keep folder structure after publishing
   publishedAt: number;
   isDeleted?: boolean; // 软删除
 }
