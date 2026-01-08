@@ -64,8 +64,14 @@ export const configRepo = {
             if (data?.value) {
                 const loaded = data.value;
                 
-                // 🟢 纯净合并逻辑：完全信任数据库中的配置，不进行任何“智能”修改
+                // 🟢 纯净合并逻辑：完全信任数据库中的配置
                 const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
+                
+                // 🚨 强制读取清理：如果检测到旧的默认代理地址 (vectorengine)，强制清空
+                // 确保用户看到的是干净的配置，迫使他们决定是直连还是填自己的代理
+                if (geminiConfig.baseUrl && geminiConfig.baseUrl.includes('vectorengine.ai')) {
+                    geminiConfig.baseUrl = "";
+                }
                 
                 // 仅当模型为空时，提供默认模型名
                 if (!geminiConfig.model || geminiConfig.model.trim() === "") {
@@ -91,14 +97,17 @@ export const configRepo = {
 
     saveSystemConfig: async (config: SystemConfig) => {
         if (!supabase) throw new Error("请先连接数据库");
-        // 保存前清理 BaseURL 格式，确保没有多余的斜杠
+        
+        // 🚨 强制保存清理：保存前再次检查，绝对禁止 vectorengine 被写入数据库
+        // 这防止用户在 UI 上误填了旧地址或者 UI 缓存导致的问题
         if (config.gemini.baseUrl) {
             config.gemini.baseUrl = config.gemini.baseUrl.trim().replace(/\/$/, ''); 
-            // 如果用户填了 googleapis.com，视为想要直连，清空 baseUrl 字段以便 SDK 使用默认逻辑
-            if (config.gemini.baseUrl.includes('googleapis.com')) {
+            
+            if (config.gemini.baseUrl.includes('vectorengine.ai') || config.gemini.baseUrl.includes('googleapis.com')) {
                 config.gemini.baseUrl = "";
             }
         }
+
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) throw new Error(getErrorMessage(error));
     }

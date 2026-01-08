@@ -84,6 +84,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
 
   const loadConfig = async () => {
       const cfg = await configRepo.getSystemConfig();
+      // 🟢 额外保险：如果 Repo 层没有清理干净，UI 层再次强制清理默认地址
+      if (cfg.gemini.baseUrl && cfg.gemini.baseUrl.includes('vectorengine.ai')) {
+          cfg.gemini.baseUrl = "";
+      }
       setSysConfig(cfg);
       checkAI();
   };
@@ -478,7 +482,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                               <div className="grid grid-cols-2 gap-4">
                                   <div>
                                       <label className="text-xs font-medium text-slate-400 block mb-1.5">Base URL (网关地址)</label>
-                                      <input type="text" value={sysConfig.gemini.baseUrl} onChange={e => updateConfig('gemini', 'baseUrl', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all" />
+                                      <input type="text" value={sysConfig.gemini.baseUrl} onChange={e => updateConfig('gemini', 'baseUrl', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all placeholder:text-slate-700" placeholder="Google直连请留空，否则填转发地址" />
                                   </div>
                                   <div>
                                       <label className="text-xs font-medium text-slate-400 block mb-1.5">Model (模型版本)</label>

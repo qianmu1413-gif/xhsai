@@ -260,7 +260,12 @@ const getAIClient = async () => {
     let baseUrl = config.gemini.baseUrl;
 
     if (!apiKey) {
-        throw new Error("❌ 未检测到 API Key。请联系管理员在【系统配置】中填入您的 Gemini API Key。");
+        throw new Error("❌ 未检测到 API Key。请在【系统配置】中填入。");
+    }
+
+    // 🚀 严格的 Key 格式校验：防止用户填 "1" 或 "abc" 导致误走某些宽容的代理
+    if (apiKey.length < 20 && !apiKey.startsWith('sk-')) {
+        throw new Error("❌ API Key 格式错误：长度不足，请检查是否复制完整。");
     }
 
     // 移除尾部斜杠，防止拼接错误
@@ -501,7 +506,16 @@ export const testConnection = async () => {
     } catch (e: any) {
         let err = e.message || '未知错误';
         if (err.includes('404')) err = '404 (模型版本不存在或路径错误)';
-        if (err.includes('400')) err = '400 (API Key 无效或格式错误)';
+        
+        // 🚀 核心优化：智能报错提示，解决用户困惑
+        if (err.includes('400')) {
+             if (debugUrl.includes('vectorengine')) {
+                 err = '400 (API Key 无效) - ⚠️ 检测到您使用了自定义 Key 但未修改网关地址。请将 Base URL 改为您自己的 API 转发地址（或者留空以直连 Google）。';
+             } else {
+                 err = '400 (API Key 无效或格式错误)';
+             }
+        }
+        
         if (err.includes('401')) err = '401 (API Key 无效或未授权)';
         if (err.includes('Failed to fetch')) err = '网络连接失败 (请检查网络或配置代理)';
         
