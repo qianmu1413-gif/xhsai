@@ -392,7 +392,7 @@ ${wordCountConstraint}
 
     // 🟢 批量生成的核心指令注入
     if (count > 1) {
-        systemText += `\n\n🚨 **批量生成指令**:\n请务必生成 **${count}** 篇完全不同的笔记方案。
+        systemText += `\n\n🚨 **批量生成指令**:\n请务必生成 **${count}** 篇**切入角度完全不同**的笔记方案（例如：一篇侧重痛点，一篇侧重干货，一篇侧重情感共鸣，或者使用不同的标题风格）。\n让用户可以一眼看出方案之间的差距。\n
 请严格按照以下格式输出，以便系统解析：
 ### 方案1
 标题：(方案1的标题)
@@ -414,7 +414,7 @@ ${wordCountConstraint}
             contents: { parts: [{ text: context || "请根据提供的背景和资料开始创作。" }, ...fileParts] },
             config: {
                 systemInstruction: systemText,
-                temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85
+                temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.9 // 提高创意模式的多样性
             }
         });
 
