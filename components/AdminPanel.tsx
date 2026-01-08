@@ -84,12 +84,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
 
   const loadConfig = async () => {
       const cfg = await configRepo.getSystemConfig();
-      // 🟢 额外保险：如果 Repo 层没有清理干净，UI 层再次强制清理默认地址
-      if (cfg.gemini.baseUrl && cfg.gemini.baseUrl.includes('vectorengine.ai')) {
-          cfg.gemini.baseUrl = "";
-      }
+      // 🟢 修复：移除了针对特定域名(如 vectorengine)的强制清空逻辑
+      // 现在系统完全信任管理员输入的任何 Base URL
       setSysConfig(cfg);
-      checkAI();
+      
+      // 延迟检测，确保状态更新
+      setTimeout(() => checkAI(), 500);
   };
 
   const refreshUserList = async () => {
@@ -116,11 +116,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
       setLoadingUsers(false);
   };
 
-  // 🟢 核心修复：显示真实的测试结果信息
   const checkAI = async () => {
-    setSysStatus({ loading: true, message: "正在检测..." });
+    setSysStatus({ loading: true, message: "正在尝试握手..." });
     const res = await testConnection();
-    // 使用返回的真实消息，而不是硬编码
     setSysStatus({ loading: false, message: res.message, success: res.success });
   };
 
@@ -229,7 +227,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
               </div>
               <div>
                   <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                      Matrix 核心控制台 <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700">v3.1.0</span>
+                      Matrix 核心控制台 <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700">v3.2.0</span>
                   </h1>
                   <p className="text-xs text-slate-500 font-medium">全域系统监控与权限管理</p>
               </div>
@@ -333,7 +331,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-950/30 text-amber-500 border border-amber-900/30">已停用</span>
                                           ) : (
                                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-950/30 text-emerald-500 border border-emerald-900/30">
-                                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 正常
+                                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-50 animate-pulse"></span> 正常
                                               </span>
                                           )
                                       )}
@@ -341,7 +339,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   <td className="px-6 py-4 text-right pr-8">
                                       <div className="flex items-center justify-end gap-2 opacity-60 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                                           <button onClick={() => onImpersonate(u)} className="p-1.5 bg-slate-800 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors border border-slate-700" title="控制台接管"><Terminal size={14}/></button>
-                                          <button onClick={() => setInspectingUser(u.id)} className={`p-1.5 border rounded-lg transition-colors ${inspectingUser === u.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent text-slate-400 border-slate-700 hover:border-slate-500'}`} title="数据透视"><Eye size={14}/></button>
+                                          <button onClick={() => setInspectingUser(u.id)} className={`p-1.5 border rounded-lg transition-colors ${inspectingUser === u.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent text-slate-400 border-slate-700 hover:border-slate-50'}`} title="数据透视"><Eye size={14}/></button>
                                           {u.role !== 'ADMIN' && !u.isDeleted && (
                                               <>
                                                 <button onClick={() => { setEditingUser(u); setEditForm({username:u.username, password:u.inviteCode}); }} className="p-1.5 hover:bg-slate-800 text-slate-400 rounded-lg"><Edit size={14}/></button>
@@ -442,7 +440,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                   <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh] custom-scrollbar">
                       {/* Gemini Section */}
                       <div className="space-y-4">
-                          <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Sparkles size={12}/> AI 模型配置 (Gemini)</h3>
+                          <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Sparkles size={12}/> AI 模型配置 (Gemini / Custom Gateway)</h3>
                           <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-4">
                               <div>
                                   <div className="flex flex-col gap-1 mb-1.5">
@@ -461,7 +459,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                               
                               {/* 🟢 NEW: API Key Input Field */}
                               <div>
-                                  <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key (Gemini/VectorEngine)</label>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key</label>
                                   <div className="relative">
                                        <input 
                                           type={showApiKey ? "text" : "password"}
@@ -483,6 +481,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   <div>
                                       <label className="text-xs font-medium text-slate-400 block mb-1.5">Base URL (网关地址)</label>
                                       <input type="text" value={sysConfig.gemini.baseUrl} onChange={e => updateConfig('gemini', 'baseUrl', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all placeholder:text-slate-700" placeholder="Google直连请留空，否则填转发地址" />
+                                      <p className="text-[9px] text-slate-500 mt-1">例如: https://api.yourdomain.com (末尾不带/)</p>
                                   </div>
                                   <div>
                                       <label className="text-xs font-medium text-slate-400 block mb-1.5">Model (模型版本)</label>

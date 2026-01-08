@@ -5,7 +5,130 @@ import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// --- 文本清洗工具 ---
+// ==========================================
+// 🛠️ Custom Proxy Client (Robust Gateway Support)
+// ==========================================
+class ProxyClient {
+    private apiKey: string;
+    private baseUrl: string;
+
+    constructor(apiKey: string, baseUrl: string) {
+        this.apiKey = apiKey;
+        // Ensure valid base URL format (remove trailing slash)
+        this.baseUrl = baseUrl.replace(/\/$/, '');
+    }
+
+    get models() {
+        return {
+            generateContent: async (args: any) => this.generateContent(args),
+            generateContentStream: async (args: any) => this.generateContentStream(args)
+        };
+    }
+
+    private normalizeContents(contents: any) {
+        // SDK accepts various formats, REST expects Content[]
+        // If it's a simple string or object, wrap it in an array
+        return Array.isArray(contents) ? contents : [contents];
+    }
+
+    private async generateContent(args: any) {
+        const { model, contents, config } = args;
+        const url = `${this.baseUrl}/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+        
+        const payload = {
+            contents: this.normalizeContents(contents),
+            generationConfig: config,
+            systemInstruction: config?.systemInstruction 
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                // Add header auth support for gateways that strip query params
+                'x-goog-api-key': this.apiKey 
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Proxy Error (${response.status}): ${errText}`);
+        }
+
+        const data = await response.json();
+        
+        // Add SDK-like .text getter
+        return {
+            ...data,
+            get text() {
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            }
+        };
+    }
+
+    private async *generateContentStream(args: any) {
+        const { model, contents, config } = args;
+        // Use SSE (Server-Sent Events) for reliable streaming across proxies
+        const url = `${this.baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
+        
+        const payload = {
+            contents: this.normalizeContents(contents),
+            generationConfig: config,
+            systemInstruction: config?.systemInstruction
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                // Add header auth support for gateways that strip query params
+                'x-goog-api-key': this.apiKey 
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+             const errText = await response.text();
+             throw new Error(`Proxy Stream Error (${response.status}): ${errText}`);
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        if (!reader) return;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; 
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonStr = line.slice(6).trim();
+                    if (jsonStr === '[DONE]') return;
+                    try {
+                        const data = JSON.parse(jsonStr);
+                        yield {
+                            ...data,
+                            get text() { return data.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
+                        };
+                    } catch (e) {
+                        // Ignore parse errors for partial chunks
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- Text Cleaning Utilities ---
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
     let cleaned = text;
@@ -34,7 +157,7 @@ const extractAndParseJSON = (text: string): any => {
     return json;
 };
 
-// --- 文件处理辅助 ---
+// --- File Handling Helpers ---
 const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
     return new Promise((resolve, reject) => {
         if (!(blob instanceof Blob)) return reject(new Error("Input is not a Blob"));
@@ -162,7 +285,8 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e: any) { return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; }
 };
 
-// 🟢 初始化 AI Client
+// 🟢 Smart Client Factory
+// Switches between official SDK and ProxyClient based on configuration
 const getAIClient = async () => {
     const config = await configRepo.getSystemConfig();
     const apiKey = config.gemini.apiKey;
@@ -170,23 +294,20 @@ const getAIClient = async () => {
 
     if (!apiKey) throw new Error("❌ 未配置 API Key");
 
-    const clientOptions: any = { apiKey: apiKey };
-
-    if (baseUrl && baseUrl.trim() !== "") {
-        if (!baseUrl.match(/^https?:\/\//)) baseUrl = `https://${baseUrl}`;
-        baseUrl = baseUrl.replace(/\/$/, '');
-        
-        // 核心修复：显式将 Base URL 传递给 SDK 配置
-        clientOptions.baseUrl = baseUrl;
+    const useProxy = baseUrl && baseUrl.trim() !== "" && !baseUrl.includes("googleapis.com");
+    
+    if (useProxy && baseUrl) {
+        console.log(`[Matrix System] Using Custom Gateway: ${baseUrl}`);
+        return {
+            client: new ProxyClient(apiKey, baseUrl), // Use custom implementation
+            modelName: config.gemini.model
+        };
     }
 
-    console.log(`[Matrix System] AI Client Init\nURL: ${baseUrl || 'Google Default'}\nKey: ${apiKey.substring(0,8)}...`);
-
+    console.log(`[Matrix System] Using Google Official SDK`);
     return {
-        client: new GoogleGenAI(clientOptions),
-        modelName: config.gemini.model,
-        apiKey: apiKey, 
-        baseUrl: baseUrl || "Google Official"
+        client: new GoogleGenAI({ apiKey: apiKey }), // Use official SDK
+        modelName: config.gemini.model
     };
 };
 
@@ -285,13 +406,17 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
     try {
         const { client, modelName } = await getAIClient();
         const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. Notes:\n${samples}`;
+        
+        // Note: For custom proxies, we rely on the ProxyClient's implementation which doesn't support Typed Schema yet,
+        // so we prompt heavily for JSON and parse manually if needed.
         const response = await client.models.generateContent({
             model: modelName, 
             contents: prompt,
             config: {
                 systemInstruction: ANALYSIS_SYSTEM_PROMPT,
                 responseMimeType: "application/json",
-                responseSchema: {
+                // Only use schema if using official SDK (ProxyClient handles raw JSON)
+                responseSchema: (client instanceof GoogleGenAI) ? {
                     type: Type.OBJECT,
                     properties: {
                         tone: { type: Type.STRING },
@@ -301,7 +426,7 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
                         writerPersonaPrompt: { type: Type.STRING }
                     },
                     required: ["tone", "keywords", "emojiDensity", "structure", "writerPersonaPrompt"]
-                }
+                } : undefined
             }
         });
         const resultText = response.text || "{}";
@@ -310,7 +435,6 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
     } catch (e: any) { return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" }; }
 };
 
-// 🟢 测试连接：使用原生 Fetch 确保完全绕过 SDK 逻辑，验证网关连通性
 export const testConnection = async () => {
     let activeConfig = { key: '未知', url: '未知', model: '未知' };
     
@@ -323,7 +447,6 @@ export const testConnection = async () => {
         if (!apiKey) return { success: false, message: "❌ API Key 为空" };
 
         if (baseUrl && baseUrl.trim() !== "") {
-            if (!baseUrl.match(/^https?:\/\//)) baseUrl = `https://${baseUrl}`;
             baseUrl = baseUrl.replace(/\/$/, '');
         } else {
             baseUrl = "https://generativelanguage.googleapis.com";
@@ -331,16 +454,18 @@ export const testConnection = async () => {
 
         activeConfig = { key: apiKey, url: baseUrl, model: model };
 
-        // 构造测试请求 (Raw HTTP)
+        // Simple REST check
         const targetUrl = `${baseUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        
         const payload = {
             contents: [{ parts: [{ text: "Respond with 'OK'" }] }]
         };
 
         const res = await fetch(targetUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey // Header auth for broader compatibility
+            },
             body: JSON.stringify(payload)
         });
 
@@ -348,11 +473,11 @@ export const testConnection = async () => {
 
         if (!res.ok) {
             let errorMsg = JSON.stringify(data.error || data);
-            if (res.status === 404) errorMsg = "404 Not Found (检查模型名称或网关地址)";
+            if (res.status === 404) errorMsg = "404 Not Found (检查模型名称或网关地址是否正确)";
             if (res.status === 400) errorMsg = "400 Bad Request (Key 无效或格式错误)";
             return { 
                 success: false, 
-                message: `❌ HTTP 请求失败 (${res.status})\nURL: ${targetUrl}\nResponse: ${errorMsg}` 
+                message: `❌ 连接失败 (${res.status})\nGateway: ${baseUrl}\nResponse: ${errorMsg}` 
             };
         }
 
@@ -360,13 +485,13 @@ export const testConnection = async () => {
         
         return { 
             success: true, 
-            message: `✅ HTTP 直连验证成功\n----------------\n[URL]: ${targetUrl}\n[Key]: ${apiKey.substring(0,8)}******\n[Response]: ${text}` 
+            message: `✅ 连接成功\nGateway: ${baseUrl}\nModel: ${model}\nResponse: ${text}` 
         };
 
     } catch (e: any) {
         return { 
             success: false, 
-            message: `❌ 网络错误 (Raw Fetch Failed)\nError: ${e.message}\nTarget: ${activeConfig.url}` 
+            message: `❌ 网络错误 (Fetch Failed)\nError: ${e.message}\nTarget: ${activeConfig.url}` 
         };
     }
 };
