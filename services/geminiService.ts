@@ -253,14 +253,31 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     }
 };
 
-const getAIClient = () => {
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+// 🟢 动态获取 Client，支持从数据库读取 Key 和 BaseURL (代理)
+const getAIClient = async () => {
+    // 从 Supabase 配置中读取，如果没配则使用默认值
+    const config = await configRepo.getSystemConfig();
+    
+    // 优先使用 Config 中的 Key，没有则尝试环境变量
+    const apiKey = config.gemini.apiKey || process.env.API_KEY;
+    
+    // ⚠️ 关键：必须使用 BaseURL (代理地址) 来解决国内 Failed to fetch 问题
+    const baseUrl = config.gemini.baseUrl;
+
+    if (!apiKey) {
+        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key，或检查环境变量。");
+    }
+
+    return new GoogleGenAI({ 
+        apiKey: apiKey,
+        baseUrl: baseUrl // 注入代理地址 (e.g. https://api.vectorengine.ai)
+    });
 };
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件可分析";
-    const ai = getAIClient();
     try {
+        const ai = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
         const response = await ai.models.generateContent({
@@ -320,7 +337,6 @@ export const streamExpertGeneration = async (
     wordLimit: number,
     onToken: (text: string, thought: string) => void
 ) => {
-    const ai = getAIClient();
     
     // 极致的字数硬约束
     const wordCountConstraint = `
@@ -368,6 +384,7 @@ ${wordCountConstraint}
     }
 
     try {
+        const ai = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         
         const response = await ai.models.generateContentStream({
@@ -401,9 +418,9 @@ ${wordCountConstraint}
 };
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
-    const ai = getAIClient();
-    const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
     try {
+        const ai = await getAIClient(); // Await 初始化
+        const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-preview',
             contents: prompt,
@@ -434,7 +451,7 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 
 export const testConnection = async () => {
     try {
-        const ai = getAIClient();
+        const ai = await getAIClient(); // Await 初始化
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: 'ping',

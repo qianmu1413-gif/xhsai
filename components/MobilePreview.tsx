@@ -1,4 +1,5 @@
 
+// ... (imports remain the same)
 import React, { useState, useRef, useMemo, memo, useEffect } from 'react';
 import { Signal, Wifi, Battery, ChevronLeft, Share2, Plus, Heart, Star, MessageCircle, Edit3, Camera, Loader2, Send, Save, QrCode, CheckCircle2, Download, Trash2, X, FilePlus, ImageIcon, AlertCircle, FolderPlus, Folder, Filter, MoreVertical, Pencil, Check, DownloadCloud, Image as ImageIconLucide, MoreHorizontal, Layers, RotateCcw, MapPin, Lock, Type, Search, CheckSquare } from 'lucide-react';
 import { NoteDraft, PublishedRecord, User } from '../types';
@@ -7,6 +8,7 @@ import Toast, { ToastState } from './Toast';
 
 const DEFAULT_NOTE_IMAGE = "https://images.unsplash.com/photo-1518133910546-b6c2fb7d79e3?q=80&w=1000&auto=format&fit=crop";
 
+// ... (keep getCharacterCount, loadImage, generateShareCard)
 // 字符长度计算 (字母 = 1个字)
 const getCharacterCount = (str: string) => {
   return str ? str.length : 0;
@@ -186,6 +188,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   publishedHistory = [], onSavePublished, onDeletePublished, onDeletePublishedBatch,
   onFileUpload, user, activeItemId, setActiveItemId, onNewNote
 }) => {
+  // ... (keep state variables)
   const [activeTab, setActiveTab] = useState<'preview' | 'all'>('preview');
   const [activeFolder, setActiveFolder] = useState<string>('全部');
   const [isPublishing, setIsPublishing] = useState(false);
@@ -203,7 +206,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const imageScrollRef = useRef<HTMLDivElement>(null);
   const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
-  // 新增：正文 Ref
   const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -493,7 +495,11 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
           const qrcode = await publishToXHS({ title, content: safeContent, imageUrls: finalImages });
           const finalRecord: PublishedRecord = { ...optimisticRecord, qrCodeUrl: qrcode };
           
-          onSavePublished?.(finalRecord);
+          // 🟢 核心修复：直接调用 onSavePublished，由父组件负责状态切换
+          // 这样不会触发父组件的 Navigation Check (因为不需要调用 setActiveItemId)
+          if (onSavePublished) {
+              onSavePublished(finalRecord);
+          }
           
           // 🟢 核心修改：如果是从草稿发布的，发布成功后直接删除原草稿
           const isDraft = drafts.some(d => String(d.id) === String(activeItemId));
@@ -501,7 +507,9 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
               onDeleteDraft(activeItemId);
           }
           
-          setActiveItemId(newId);
+          // ⚠️ DO NOT call setActiveItemId(newId) here. 
+          // The parent (Workstation) handles the ID switch inside onSavePublished success handler.
+          
           setShowQrModal(finalRecord);
           setActiveTab('all'); 
           showToast("发布成功");
@@ -543,6 +551,8 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                              <button className="bg-rose-50 text-[#ff2442] text-[10px] font-bold px-2.5 py-1 rounded-full ml-1">关注</button>
                         </div>
                         <div className="flex gap-2 text-[#333] items-center">
+                            {/* 🟢 新增：Header上的新建笔记按钮，确保用户能明确看到 */}
+                            <button onClick={handleNewNoteWrapper} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600" title="新建笔记"><FilePlus size={20} strokeWidth={1.5}/></button>
                             <button onClick={() => onSaveToLibrary(title, safeContent, 'note', activeItemId || undefined, activeFolder !== '全部' ? activeFolder : undefined)} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><Save size={20} strokeWidth={1.5}/></button>
                             <button className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><Share2 size={20} strokeWidth={1.5} /></button>
                         </div>
