@@ -67,11 +67,8 @@ export const configRepo = {
                 // 🟢 纯净合并逻辑：完全信任数据库中的配置
                 const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
                 
-                // 🚨 强制读取清理：如果检测到旧的默认代理地址 (vectorengine)，强制清空
-                // 确保用户看到的是干净的配置，迫使他们决定是直连还是填自己的代理
-                if (geminiConfig.baseUrl && geminiConfig.baseUrl.includes('vectorengine.ai')) {
-                    geminiConfig.baseUrl = "";
-                }
+                // ⚠️ 修复：移除自动清理逻辑。完全信任用户填写的 baseUrl，不做任何过滤。
+                // 之前这里的逻辑会导致部分用户的自定义代理地址被误删。
                 
                 // 仅当模型为空时，提供默认模型名
                 if (!geminiConfig.model || geminiConfig.model.trim() === "") {
@@ -98,14 +95,9 @@ export const configRepo = {
     saveSystemConfig: async (config: SystemConfig) => {
         if (!supabase) throw new Error("请先连接数据库");
         
-        // 🚨 强制保存清理：保存前再次检查，绝对禁止 vectorengine 被写入数据库
-        // 这防止用户在 UI 上误填了旧地址或者 UI 缓存导致的问题
+        // 🟢 修复：仅去除首尾空格和尾部斜杠，不再强制清空包含特定关键词的地址
         if (config.gemini.baseUrl) {
             config.gemini.baseUrl = config.gemini.baseUrl.trim().replace(/\/$/, ''); 
-            
-            if (config.gemini.baseUrl.includes('vectorengine.ai') || config.gemini.baseUrl.includes('googleapis.com')) {
-                config.gemini.baseUrl = "";
-            }
         }
 
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
