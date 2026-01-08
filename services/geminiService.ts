@@ -5,23 +5,68 @@ import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// 协议分隔符
-const DATA_MARKER = "###MATRIX_DATA_START###";
+// --- 全局 Fetch 拦截器 (核武器级代理) ---
+// 只要这个文件被加载，就会激活拦截，确保 SDK 无法绕过
+const originalFetch = window.fetch.bind(window);
+let GLOBAL_PROXY_BASE_URL: string | null = null;
+let GLOBAL_PROXY_KEY: string | null = null;
+
+// 定义代理函数
+const proxyFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input instanceof Request ? input.url : '';
+
+    // 🎯 拦截目标：Google Gemini API
+    if (GLOBAL_PROXY_BASE_URL && (urlStr.includes('googleapis.com') || urlStr.includes('generativelanguage'))) {
+        try {
+            // 1. 提取路径 (例如 /v1beta/models/...)
+            const urlObj = new URL(urlStr);
+            const path = urlObj.pathname + urlObj.search;
+            
+            // 2. 强制替换为用户网关
+            // 注意：移除尾部斜杠以防双重斜杠
+            const cleanBase = GLOBAL_PROXY_BASE_URL!.replace(/\/$/, '');
+            const newUrl = `${cleanBase}${path}`;
+            
+            console.log(`[Matrix Network] ⚡ 强制重定向:\n原地址: ${urlStr}\n新地址: ${newUrl}`);
+            
+            return originalFetch(newUrl, init);
+        } catch (e) {
+            console.error("[Matrix Network] 重定向失败:", e);
+        }
+    }
+    
+    return originalFetch(input, init);
+};
+
+// 🟢 修复核心：安全地覆盖 window.fetch
+try {
+    Object.defineProperty(window, 'fetch', {
+        value: proxyFetch,
+        writable: true,
+        configurable: true
+    });
+    console.log("[Matrix System] 核心网络拦截器已装载 (Object.defineProperty)");
+} catch (e) {
+    console.error("[Matrix System] 拦截器装载失败，尝试降级方案:", e);
+    // 降级尝试：直接赋值 (部分环境可能允许)
+    try {
+        (window as any).fetch = proxyFetch;
+    } catch (e2) {
+        console.error("Critical: Cannot override fetch", e2);
+    }
+}
 
 // --- 文本清洗工具 ---
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
     let cleaned = text;
-
     cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
     cleaned = cleaned.replace(/\[\[THOUGHT\]\][\s\S]*?\[\[\/THOUGHT\]\]/gi, "");
     cleaned = cleaned.replace(/^(Here is (the|a)|Sure, here is|Okay, here is|Based on the content).*?:/gmi, "");
-    
     cleaned = cleaned.replace(/\*\*Persona\*\*:/gi, "**人设定位**:");
     cleaned = cleaned.replace(/\*\*Topic\*\*:/gi, "**主题分析**:");
     cleaned = cleaned.replace(/\*\*Target Audience\*\*:/gi, "**目标人群**:");
     cleaned = cleaned.replace(/\*\*Key Data\*\*:/gi, "**核心数据**:");
-
     return cleaned.trim();
 };
 
@@ -41,7 +86,6 @@ const extractAndParseJSON = (text: string): any => {
 };
 
 // --- 文件处理辅助 ---
-
 const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
     return new Promise((resolve, reject) => {
         if (!(blob instanceof Blob)) return reject(new Error("Input is not a Blob"));
@@ -69,21 +113,18 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
     const cleanUrl = url.split('?')[0]; 
     const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
-
     try {
-        const response = await fetch(timestampUrl, { cache: 'no-store', mode: 'cors', credentials: 'omit' }); 
+        const response = await originalFetch(timestampUrl, { cache: 'no-store', mode: 'cors', credentials: 'omit' }); 
         if (response.ok) return await response.blob();
         if (response.status === 403) throw new Error("403 Forbidden");
     } catch (e: any) { 
         if (e.message.includes('403')) throw new Error("403 权限拒绝: 请检查腾讯云 COS 防盗链设置");
     }
-
     try {
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl);
+        const res = await originalFetch(proxyUrl);
         if (res.ok) return await res.blob();
     } catch (e) {}
-
     throw new Error("无法从云端下载文件 (CORS/网络拦截)");
 };
 
@@ -132,12 +173,8 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
 
         if (blob) { mimeType = blob.type || mimeType; } 
         else if (file.data.startsWith('http')) {
-            try {
-                blob = await fetchUrlAsBlob(file.data);
-                mimeType = blob.type || mimeType;
-            } catch (fetchErr: any) {
-                return { text: `[系统警告: 附件 "${file.name}" 读取失败。]` };
-            }
+            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } 
+            catch (fetchErr: any) { return { text: `[系统警告: 附件 "${file.name}" 读取失败。]` }; }
         }
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
@@ -176,82 +213,30 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e: any) { return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; }
 };
 
-// 🟢 核心修复：SDK 初始化时注入 BaseURL，并双重拦截
+// 🟢 初始化 AI Client (更新全局变量)
 const getAIClient = async () => {
     const config = await configRepo.getSystemConfig();
     const apiKey = config.gemini.apiKey;
     let baseUrl = config.gemini.baseUrl;
 
-    if (!apiKey) {
-        throw new Error("❌ 未配置 API Key。请在【系统配置】中填入。");
-    }
+    if (!apiKey) throw new Error("❌ 未配置 API Key");
 
-    // 1. URL 格式化 (自动补全 https)
-    if (baseUrl && baseUrl.trim() !== "" && !baseUrl.match(/^https?:\/\//)) {
-        baseUrl = `https://${baseUrl}`;
-    }
-    if (baseUrl) {
-        baseUrl = baseUrl.replace(/\/$/, '');
-    }
-
-    // 2. HTTPS 安全检查
-    if (baseUrl && typeof window !== 'undefined' && window.location.protocol === 'https:' && baseUrl.startsWith('http:')) {
-        throw new Error(`🔒 安全阻断: 当前 HTTPS 环境禁止连接不安全的 HTTP 网关 (${baseUrl})。请使用 HTTPS 网关。`);
-    }
-
-    // 3. 构造请求拦截器 (双重保险，防止 SDK 忽略 baseUrl)
-    let requestOptions: any = {};
     if (baseUrl && baseUrl.trim() !== "") {
-        console.log(`[Matrix Proxy] ⚡ 强制代理模式开启: ${baseUrl}`);
+        if (!baseUrl.match(/^https?:\/\//)) baseUrl = `https://${baseUrl}`;
+        baseUrl = baseUrl.replace(/\/$/, '');
         
-        const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-            let originalUrl = '';
-            if (typeof input === 'string') originalUrl = input;
-            else if (input instanceof URL) originalUrl = input.toString();
-            else if (input instanceof Request) originalUrl = input.url;
-            else originalUrl = String(input);
-            
-            let finalUrl = originalUrl;
-            
-            // 🚨 强制重定向：所有发往 googleapis 的请求都被劫持到 baseUrl
-            if (originalUrl.includes('googleapis.com')) {
-                // 移除原有的 Google 域名
-                const path = originalUrl.replace(/^https?:\/\/[^\/]+/, '');
-                finalUrl = `${baseUrl}${path}`;
-                
-                console.log(`[Matrix Proxy] 🚀 拦截并重定向:\nFrom: ${originalUrl}\nTo:   ${finalUrl}`);
-            }
-
-            const newInit = { ...init, credentials: 'omit' as RequestCredentials, mode: 'cors' as RequestMode };
-            
-            try {
-                // 使用 window.fetch 发送修改后的请求
-                const response = await window.fetch(finalUrl, newInit);
-                if (!response.ok) {
-                    console.error(`[Matrix Proxy] 请求失败: ${response.status} ${response.statusText}`);
-                }
-                return response;
-            } catch (networkError: any) {
-                console.error("[Matrix Proxy] 网络错误:", networkError);
-                throw new Error(`无法连接到网关 (${baseUrl})。错误: ${networkError.message}`);
-            }
-        };
-        requestOptions.customFetch = customFetch;
+        // 更新全局拦截变量
+        GLOBAL_PROXY_BASE_URL = baseUrl;
+        GLOBAL_PROXY_KEY = apiKey;
+    } else {
+        GLOBAL_PROXY_BASE_URL = null;
     }
 
-    // 4. 初始化客户端
-    // 🔍 调试信息：在控制台打印当前使用的配置
-    console.log(`%c[Matrix System] 正在初始化 AI 客户端`, "color: #0ea5e9; font-weight: bold");
-    console.log(`%c[Key] ${apiKey.substring(0, 8)}******`, "color: #f59e0b");
-    console.log(`%c[URL] ${baseUrl || "Google Official (Default)"}`, "color: #10b981");
+    console.log(`[Matrix System] AI Client Init\nURL: ${baseUrl || 'Google Default'}\nKey: ${apiKey.substring(0,8)}...`);
 
+    // 即使 SDK 忽略 baseUrl，我们的 proxyFetch 拦截器也会生效
     return {
-        client: new GoogleGenAI({ 
-            apiKey: apiKey,
-            // 🟢 核心修复：必须显式将 baseUrl 传入构造函数，否则新版 SDK 会忽略它！
-            baseUrl: baseUrl, 
-            requestOptions: requestOptions // 拦截器作为备份
-        }),
+        client: new GoogleGenAI({ apiKey: apiKey }),
         modelName: config.gemini.model,
         apiKey: apiKey, 
         baseUrl: baseUrl || "Google Official"
@@ -270,9 +255,7 @@ export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> =
             config: { temperature: 0.2 }
         });
         return cleanText(response.text || "分析失败");
-    } catch (e: any) {
-        return `分析过程发生错误: ${e.message || '未知错误'}`;
-    }
+    } catch (e: any) { return `分析过程发生错误: ${e.message}`; }
 };
 
 const parseBulkNotes = (text: string): BulkNote[] => {
@@ -307,10 +290,7 @@ export const streamExpertGeneration = async (
     wordLimit: number,
     onToken: (text: string, thought: string) => void
 ) => {
-    const wordCountConstraint = `
-🚨 **字数硬性指标**:
-生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。
-`;
+    const wordCountConstraint = `生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。`;
     const commonRules = `🚨 **核心规范**: 1. 严禁输出 <thinking> 标签。2. 语气符合小红书博主身份。${wordCountConstraint}`;
     
     let systemText = "";
@@ -349,20 +329,15 @@ export const streamExpertGeneration = async (
         }
 
         let parsedNotes: BulkNote[] = [];
-        if (count > 1) {
-            parsedNotes = parseBulkNotes(cleanText(fullText));
-        }
-
+        if (count > 1) parsedNotes = parseBulkNotes(cleanText(fullText));
         return { dialogueText: cleanText(fullText), thought: "", notes: parsedNotes };
-    } catch (e: any) {
-        return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] };
-    }
+    } catch (e: any) { return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] }; }
 };
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
         const { client, modelName } = await getAIClient();
-        const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
+        const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. Notes:\n${samples}`;
         const response = await client.models.generateContent({
             model: modelName, 
             contents: prompt,
@@ -385,45 +360,66 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
         const resultText = response.text || "{}";
         onToken(resultText);
         return extractAndParseJSON(resultText) || { tone: "默认" };
-    } catch (e: any) {
-        console.error("Persona Analysis Error", e);
-        return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" };
-    }
+    } catch (e: any) { return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" }; }
 };
 
-// 🟢 核心修复：在测试连接中明确返回 Key 和 URL，回答用户的“到底是哪个API”的问题
+// 🟢 核心修复：不使用 SDK，直接用原生 HTTP 请求测试
 export const testConnection = async () => {
-    let activeConfig = { key: '未知', url: '未知' };
+    let activeConfig = { key: '未知', url: '未知', model: '未知' };
     
     try {
-        const { client, modelName, apiKey, baseUrl } = await getAIClient(); 
-        
-        // 显式暴露当前使用的 Key 和 URL
-        activeConfig.key = apiKey ? `${apiKey.substring(0, 8)}******` : "未读取到";
-        activeConfig.url = baseUrl || "Google Official (未配置转发)";
+        const config = await configRepo.getSystemConfig();
+        const apiKey = config.gemini.apiKey;
+        let baseUrl = config.gemini.baseUrl;
+        const model = config.gemini.model || 'gemini-3-flash-preview';
 
-        const response = await client.models.generateContent({
-            model: modelName, 
-            contents: 'OK',
-        });
-        
-        const text = response.text;
-        
-        if (text) {
-             return { success: true, message: `✅ 验证通过\n----------------\n[当前使用 Key]: ${activeConfig.key}\n[当前请求网关]: ${activeConfig.url}\n[AI 响应内容]: ${text.trim().substring(0, 20)}...` };
+        if (!apiKey) return { success: false, message: "❌ API Key 为空" };
+
+        if (baseUrl && baseUrl.trim() !== "") {
+            if (!baseUrl.match(/^https?:\/\//)) baseUrl = `https://${baseUrl}`;
+            baseUrl = baseUrl.replace(/\/$/, '');
         } else {
-             return { success: false, message: `❌ 连接建立但无内容返回\n[Key]: ${activeConfig.key}` };
-        }
-    } catch (e: any) {
-        let err = e.message || '未知错误';
-        
-        if (err.includes('404')) err = '404 (模型版本不存在/路径错误)';
-        if (err.includes('401')) err = '401 (API Key 无效/未授权)';
-        if (err.includes('429')) err = '429 (请求过多/额度耗尽)';
-        if (err.includes('Failed to fetch') || err.includes('NetworkError')) {
-             err = `网络连接失败 (无法连接到 ${activeConfig.url})`;
+            baseUrl = "https://generativelanguage.googleapis.com";
         }
 
-        return { success: false, message: `❌ 连接失败\n----------------\n[错误信息]: ${err}\n[尝试连接]: ${activeConfig.url}\n[使用密钥]: ${activeConfig.key}` };
+        activeConfig = { key: apiKey, url: baseUrl, model: model };
+
+        // 构造测试请求 (Raw HTTP)
+        const targetUrl = `${baseUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        
+        const payload = {
+            contents: [{ parts: [{ text: "Respond with 'OK'" }] }]
+        };
+
+        const res = await originalFetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            let errorMsg = JSON.stringify(data.error || data);
+            if (res.status === 404) errorMsg = "404 Not Found (检查模型名称或网关地址)";
+            if (res.status === 400) errorMsg = "400 Bad Request (Key 无效或格式错误)";
+            return { 
+                success: false, 
+                message: `❌ HTTP 请求失败 (${res.status})\nURL: ${targetUrl}\nResponse: ${errorMsg}` 
+            };
+        }
+
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No Content";
+        
+        return { 
+            success: true, 
+            message: `✅ HTTP 直连验证成功\n----------------\n[URL]: ${targetUrl}\n[Key]: ${apiKey.substring(0,8)}******\n[Response]: ${text}` 
+        };
+
+    } catch (e: any) {
+        return { 
+            success: false, 
+            message: `❌ 网络错误 (Raw Fetch Failed)\nError: ${e.message}\nTarget: ${activeConfig.url}` 
+        };
     }
 };
