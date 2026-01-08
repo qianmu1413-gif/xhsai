@@ -5,57 +5,6 @@ import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// --- 全局 Fetch 拦截器 (核武器级代理) ---
-// 只要这个文件被加载，就会激活拦截，确保 SDK 无法绕过
-const originalFetch = window.fetch.bind(window);
-let GLOBAL_PROXY_BASE_URL: string | null = null;
-let GLOBAL_PROXY_KEY: string | null = null;
-
-// 定义代理函数
-const proxyFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    let urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input instanceof Request ? input.url : '';
-
-    // 🎯 拦截目标：Google Gemini API
-    if (GLOBAL_PROXY_BASE_URL && (urlStr.includes('googleapis.com') || urlStr.includes('generativelanguage'))) {
-        try {
-            // 1. 提取路径 (例如 /v1beta/models/...)
-            const urlObj = new URL(urlStr);
-            const path = urlObj.pathname + urlObj.search;
-            
-            // 2. 强制替换为用户网关
-            // 注意：移除尾部斜杠以防双重斜杠
-            const cleanBase = GLOBAL_PROXY_BASE_URL!.replace(/\/$/, '');
-            const newUrl = `${cleanBase}${path}`;
-            
-            console.log(`[Matrix Network] ⚡ 强制重定向:\n原地址: ${urlStr}\n新地址: ${newUrl}`);
-            
-            return originalFetch(newUrl, init);
-        } catch (e) {
-            console.error("[Matrix Network] 重定向失败:", e);
-        }
-    }
-    
-    return originalFetch(input, init);
-};
-
-// 🟢 修复核心：安全地覆盖 window.fetch
-try {
-    Object.defineProperty(window, 'fetch', {
-        value: proxyFetch,
-        writable: true,
-        configurable: true
-    });
-    console.log("[Matrix System] 核心网络拦截器已装载 (Object.defineProperty)");
-} catch (e) {
-    console.error("[Matrix System] 拦截器装载失败，尝试降级方案:", e);
-    // 降级尝试：直接赋值 (部分环境可能允许)
-    try {
-        (window as any).fetch = proxyFetch;
-    } catch (e2) {
-        console.error("Critical: Cannot override fetch", e2);
-    }
-}
-
 // --- 文本清洗工具 ---
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
@@ -114,7 +63,7 @@ const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
     const cleanUrl = url.split('?')[0]; 
     const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
     try {
-        const response = await originalFetch(timestampUrl, { cache: 'no-store', mode: 'cors', credentials: 'omit' }); 
+        const response = await fetch(timestampUrl, { cache: 'no-store', mode: 'cors', credentials: 'omit' }); 
         if (response.ok) return await response.blob();
         if (response.status === 403) throw new Error("403 Forbidden");
     } catch (e: any) { 
@@ -122,7 +71,7 @@ const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
     }
     try {
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-        const res = await originalFetch(proxyUrl);
+        const res = await fetch(proxyUrl);
         if (res.ok) return await res.blob();
     } catch (e) {}
     throw new Error("无法从云端下载文件 (CORS/网络拦截)");
@@ -213,7 +162,7 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e: any) { return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; }
 };
 
-// 🟢 初始化 AI Client (更新全局变量)
+// 🟢 初始化 AI Client
 const getAIClient = async () => {
     const config = await configRepo.getSystemConfig();
     const apiKey = config.gemini.apiKey;
@@ -221,22 +170,20 @@ const getAIClient = async () => {
 
     if (!apiKey) throw new Error("❌ 未配置 API Key");
 
+    const clientOptions: any = { apiKey: apiKey };
+
     if (baseUrl && baseUrl.trim() !== "") {
         if (!baseUrl.match(/^https?:\/\//)) baseUrl = `https://${baseUrl}`;
         baseUrl = baseUrl.replace(/\/$/, '');
         
-        // 更新全局拦截变量
-        GLOBAL_PROXY_BASE_URL = baseUrl;
-        GLOBAL_PROXY_KEY = apiKey;
-    } else {
-        GLOBAL_PROXY_BASE_URL = null;
+        // 核心修复：显式将 Base URL 传递给 SDK 配置
+        clientOptions.baseUrl = baseUrl;
     }
 
     console.log(`[Matrix System] AI Client Init\nURL: ${baseUrl || 'Google Default'}\nKey: ${apiKey.substring(0,8)}...`);
 
-    // 即使 SDK 忽略 baseUrl，我们的 proxyFetch 拦截器也会生效
     return {
-        client: new GoogleGenAI({ apiKey: apiKey }),
+        client: new GoogleGenAI(clientOptions),
         modelName: config.gemini.model,
         apiKey: apiKey, 
         baseUrl: baseUrl || "Google Official"
@@ -363,7 +310,7 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
     } catch (e: any) { return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" }; }
 };
 
-// 🟢 核心修复：不使用 SDK，直接用原生 HTTP 请求测试
+// 🟢 测试连接：使用原生 Fetch 确保完全绕过 SDK 逻辑，验证网关连通性
 export const testConnection = async () => {
     let activeConfig = { key: '未知', url: '未知', model: '未知' };
     
@@ -391,7 +338,7 @@ export const testConnection = async () => {
             contents: [{ parts: [{ text: "Respond with 'OK'" }] }]
         };
 
-        const res = await originalFetch(targetUrl, {
+        const res = await fetch(targetUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
