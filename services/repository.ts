@@ -32,12 +32,11 @@ export const getErrorMessage = (error: any): string => {
     }
 };
 
-// 默认配置 (敏感信息已移除，必须从数据库加载)
-// 🟢 针对 vectorengine.ai 优化的默认配置
+// 默认配置 (纯净版 - 无任何内置第三方服务)
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
         apiKey: "", 
-        baseUrl: "https://api.vectorengine.ai", // 强制默认使用中转地址
+        baseUrl: "", // 默认为空，代表使用 Google 官方接口
         model: "gemini-3-flash-preview" 
     },
     xhs: { 
@@ -65,22 +64,10 @@ export const configRepo = {
             if (data?.value) {
                 const loaded = data.value;
                 
-                // 🟢 智能合并逻辑
+                // 🟢 纯净合并逻辑：完全信任数据库中的配置，不进行任何“智能”修改
                 const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
                 
-                // 🛡️ 强制修正：如果 BaseURL 是空的，或者是 Google 原生地址，强制切回 vectorengine
-                if (!geminiConfig.baseUrl || geminiConfig.baseUrl.trim() === "" || geminiConfig.baseUrl.includes('googleapis.com')) {
-                    geminiConfig.baseUrl = "https://api.vectorengine.ai";
-                }
-                
-                // 🛡️ 双重保险：如果 Key 是 sk- 开头 (中转Key)，且 URL 不包含 vector/api 字眼，强制覆盖
-                if (geminiConfig.apiKey && geminiConfig.apiKey.startsWith('sk-')) {
-                     // 只要当前配置不是 vectorengine，就强制改成 vectorengine
-                     if (!geminiConfig.baseUrl.includes('vectorengine')) {
-                         geminiConfig.baseUrl = "https://api.vectorengine.ai";
-                     }
-                }
-
+                // 仅当模型为空时，提供默认模型名
                 if (!geminiConfig.model || geminiConfig.model.trim() === "") {
                     geminiConfig.model = DEFAULT_CONFIG.gemini.model;
                 }
@@ -104,11 +91,13 @@ export const configRepo = {
 
     saveSystemConfig: async (config: SystemConfig) => {
         if (!supabase) throw new Error("请先连接数据库");
-        // 保存前自动清理 BaseURL 格式
+        // 保存前清理 BaseURL 格式，确保没有多余的斜杠
         if (config.gemini.baseUrl) {
-            config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/$/, ''); // 去除尾部斜杠
-            config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/v1beta$/, ''); // 去除可能的版本号
-            config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/v1$/, ''); 
+            config.gemini.baseUrl = config.gemini.baseUrl.trim().replace(/\/$/, ''); 
+            // 如果用户填了 googleapis.com，视为想要直连，清空 baseUrl 字段以便 SDK 使用默认逻辑
+            if (config.gemini.baseUrl.includes('googleapis.com')) {
+                config.gemini.baseUrl = "";
+            }
         }
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) throw new Error(getErrorMessage(error));

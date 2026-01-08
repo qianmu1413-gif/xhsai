@@ -253,56 +253,49 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     }
 };
 
-// 🟢 核心修复：强制代理拦截器 (Nucleuar Option)
+// 🟢 核心修复：完全透明化客户端配置，移除所有默认代理和强制逻辑
 const getAIClient = async () => {
     const config = await configRepo.getSystemConfig();
     const apiKey = config.gemini.apiKey;
-    
-    // 🚀 核弹级修复：只要是 sk- 开头的 Key，不管配置里写啥，一律强制走 vectorengine
     let baseUrl = config.gemini.baseUrl;
-    const isProxyKey = apiKey.startsWith('sk-');
-
-    if (isProxyKey) {
-        baseUrl = "https://api.vectorengine.ai";
-    } else if (!baseUrl || baseUrl.includes('googleapis.com') || baseUrl.trim() === "") {
-        // 如果不是 sk- Key 但也没配 BaseURL，尝试走 vectorengine (防止配置为空)
-        baseUrl = "https://api.vectorengine.ai";
-    }
-
-    // 移除尾部斜杠，防止拼接错误
-    baseUrl = baseUrl.replace(/\/$/, '');
 
     if (!apiKey) {
         throw new Error("❌ 未检测到 API Key。请联系管理员在【系统配置】中填入您的 Gemini API Key。");
     }
 
-    // 定义自定义 Fetch，强制拦截所有去往 Google 的请求
-    // 这是为了防止 SDK 内部写死了 googleapis.com 导致绕过 baseUrl
-    const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-        let urlStr = input.toString();
-        
-        // 🚨 核心拦截逻辑：只要目标是 googleapis.com，就强制重定向到我们配置的 baseUrl
-        if (urlStr.includes('generativelanguage.googleapis.com')) {
-            // 正则替换：将 https://generativelanguage.googleapis.com 替换为 baseUrl
-            // 这样可以保留后续的 /v1beta/models/... 路径
-            urlStr = urlStr.replace(/^https?:\/\/generativelanguage\.googleapis\.com/, baseUrl);
-        }
-        
-        // 🚨 确保不发送 Credentials 以避免 CORS 问题 (中转服务通常不支持)
-        const newInit = { ...init, credentials: 'omit' as RequestCredentials };
-        
-        return fetch(urlStr, newInit);
-    };
+    // 移除尾部斜杠，防止拼接错误
+    if (baseUrl) {
+        baseUrl = baseUrl.replace(/\/$/, '');
+    }
+
+    // 只有当用户明确配置了 baseUrl 时，才应用 customFetch
+    // 否则直接使用 Google 官方 SDK 的默认行为 (直连 generativelanguage.googleapis.com)
+    let requestOptions: any = {};
+    
+    if (baseUrl && baseUrl.trim() !== "") {
+        const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+            let urlStr = input.toString();
+            
+            // 拦截并重定向
+            if (urlStr.includes('generativelanguage.googleapis.com')) {
+                urlStr = urlStr.replace(/^https?:\/\/generativelanguage\.googleapis\.com/, baseUrl!);
+            }
+            
+            // 🚨 重要：使用代理时通常不发送 Credentials 以避免 CORS 问题
+            const newInit = { ...init, credentials: 'omit' as RequestCredentials };
+            return fetch(urlStr, newInit);
+        };
+        requestOptions.customFetch = customFetch;
+    }
 
     return {
         client: new GoogleGenAI({ 
             apiKey: apiKey,
-            // 即使传入 baseUrl，我们也通过 requestOptions.customFetch 做双重保险
-            requestOptions: {
-                customFetch: customFetch
-            }
+            requestOptions: requestOptions
         }),
-        modelName: config.gemini.model
+        modelName: config.gemini.model,
+        apiKey: apiKey, 
+        baseUrl: baseUrl || "Google Official (Default)"
     };
 };
 
@@ -481,16 +474,37 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
     }
 };
 
+// 🟢 核心修复：真实且透明的连接测试
 export const testConnection = async () => {
+    let debugKey = "未知";
+    let debugUrl = "Google Official";
+    
     try {
-        const { client } = await getAIClient(); // Await 初始化
+        const { client, modelName, apiKey, baseUrl } = await getAIClient(); // Await 初始化
+        
+        debugKey = apiKey ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : "未读取到";
+        debugUrl = baseUrl;
+
+        // 移除 thinkingConfig 以兼容所有模型
         const response = await client.models.generateContent({
-            model: 'gemini-3-flash-preview', 
-            contents: 'ping',
-            config: { thinkingConfig: { thinkingBudget: 0 } }
+            model: modelName, 
+            contents: 'Respond with exactly one word: "OK"',
         });
-        return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
+        
+        const text = response.text;
+        
+        if (text) {
+             return { success: true, message: `✅ 验证通过\n[Gateway]: ${debugUrl}\n[Key]: ${debugKey}\n[AI回复]: ${text.trim()}` };
+        } else {
+             return { success: false, message: `❌ 连接成功但无回复\n[Key]: ${debugKey}` };
+        }
     } catch (e: any) {
-        return { success: false, message: e.message || "连接发生未知错误" };
+        let err = e.message || '未知错误';
+        if (err.includes('404')) err = '404 (模型版本不存在或路径错误)';
+        if (err.includes('400')) err = '400 (API Key 无效或格式错误)';
+        if (err.includes('401')) err = '401 (API Key 无效或未授权)';
+        if (err.includes('Failed to fetch')) err = '网络连接失败 (请检查网络或配置代理)';
+        
+        return { success: false, message: `❌ 连接失败: ${err}\n[Target]: ${debugUrl}\n[Key]: ${debugKey}` };
     }
 };

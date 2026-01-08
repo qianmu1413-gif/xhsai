@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, SystemConfig, Project } from '../types';
-import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon } from 'lucide-react';
+import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, EyeOff, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon } from 'lucide-react';
 import { testConnection } from '../services/geminiService';
 import { userRepo, configRepo, projectRepo, getErrorMessage } from '../services/repository'; 
 import Toast, { ToastState } from './Toast';
@@ -53,6 +53,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState<{show: boolean, message: string, action: () => void} | null>(null);
+  // NEW: Toggle key visibility
+  const [showApiKey, setShowApiKey] = useState(false);
 
   // Data Inspection (God Mode)
   const [inspectingUser, setInspectingUser] = useState<string | null>(null);
@@ -110,10 +112,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
       setLoadingUsers(false);
   };
 
+  // 🟢 核心修复：显示真实的测试结果信息
   const checkAI = async () => {
-    setSysStatus({ loading: true, message: "正在检测网关..." });
+    setSysStatus({ loading: true, message: "正在检测..." });
     const res = await testConnection();
-    setSysStatus({ loading: false, message: res.success ? "连接正常" : res.message, success: res.success });
+    // 使用返回的真实消息，而不是硬编码
+    setSysStatus({ loading: false, message: res.message, success: res.success });
   };
 
   const saveConfig = async () => {
@@ -437,9 +441,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                           <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-2"><Sparkles size={12}/> AI 模型配置 (Gemini)</h3>
                           <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800 space-y-4">
                               <div>
-                                  <div className="flex justify-between items-center mb-1.5">
-                                      <label className="text-xs font-medium text-slate-400">Gateway Status</label>
-                                      <span className={`text-[10px] px-2 py-0.5 rounded ${sysStatus.success ? 'bg-emerald-950 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>{sysStatus.message}</span>
+                                  <div className="flex flex-col gap-1 mb-1.5">
+                                      <div className="flex justify-between items-center">
+                                          <label className="text-xs font-medium text-slate-400">Gateway Status</label>
+                                          <span className={`text-[10px] px-2 py-0.5 rounded ${sysStatus.success ? 'bg-emerald-950 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>
+                                            {sysStatus.success ? '连接成功' : '未连接/异常'}
+                                          </span>
+                                      </div>
+                                      {/* 显示详细的调试信息 */}
+                                      <div className="text-[10px] font-mono text-slate-500 bg-black/20 p-2 rounded border border-slate-800/50 whitespace-pre-wrap">
+                                          {sysStatus.message}
+                                      </div>
                                   </div>
                               </div>
                               
@@ -448,13 +460,18 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key (Gemini/VectorEngine)</label>
                                   <div className="relative">
                                        <input 
-                                          type="password" 
+                                          type={showApiKey ? "text" : "password"}
                                           value={sysConfig.gemini.apiKey} 
                                           onChange={e => updateConfig('gemini', 'apiKey', e.target.value)} 
                                           className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all pr-10" 
                                           placeholder="sk-..." 
                                       />
-                                      <div className="absolute right-3 top-2 text-slate-500"><Key size={12}/></div>
+                                      <div className="absolute right-2 top-2 flex gap-2">
+                                          <button onClick={() => setShowApiKey(!showApiKey)} className="text-slate-500 hover:text-white transition-colors">
+                                              {showApiKey ? <EyeOff size={14}/> : <Eye size={14}/>}
+                                          </button>
+                                          <div className="text-slate-500"><Key size={14}/></div>
+                                      </div>
                                   </div>
                               </div>
                               
