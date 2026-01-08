@@ -31,14 +31,35 @@ class ProxyClient {
         return Array.isArray(contents) ? contents : [contents];
     }
 
+    // 🟢 核心修复：格式化 System Instruction
+    // 中转网关通常要求严格的 { parts: [{ text: "" }] } 结构，不支持纯字符串
+    private formatSystemInstruction(instruction: any) {
+        if (!instruction) return undefined;
+        
+        // 如果已经是纯字符串，封装成对象
+        if (typeof instruction === 'string') {
+            return { parts: [{ text: instruction }] };
+        }
+        
+        // 如果已经是对象但没有 parts (兼容性处理)，尝试修复
+        if (typeof instruction === 'object' && !instruction.parts && !instruction.role) {
+             return { parts: [{ text: JSON.stringify(instruction) }] };
+        }
+
+        return instruction;
+    }
+
     private async generateContent(args: any) {
         const { model, contents, config } = args;
         const url = `${this.baseUrl}/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
         
+        // 分离 systemInstruction 和其他配置
+        const { systemInstruction, ...genConfig } = config || {};
+
         const payload = {
             contents: this.normalizeContents(contents),
-            generationConfig: config,
-            systemInstruction: config?.systemInstruction 
+            generationConfig: genConfig,
+            systemInstruction: this.formatSystemInstruction(systemInstruction)
         };
 
         const response = await fetch(url, {
@@ -72,10 +93,13 @@ class ProxyClient {
         // Use SSE (Server-Sent Events) for reliable streaming across proxies
         const url = `${this.baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
         
+        // 分离 systemInstruction 和其他配置
+        const { systemInstruction, ...genConfig } = config || {};
+
         const payload = {
             contents: this.normalizeContents(contents),
-            generationConfig: config,
-            systemInstruction: config?.systemInstruction
+            generationConfig: genConfig,
+            systemInstruction: this.formatSystemInstruction(systemInstruction)
         };
 
         const response = await fetch(url, {
@@ -316,7 +340,8 @@ export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> =
     try {
         const { client, modelName } = await getAIClient();
         const fileParts = await Promise.all(files.map(prepareFilePart));
-        const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。`;
+        // 🔥 强化中文输出指令
+        const prompt = `分析提供的素材，提取核心营销卖点。⚠️请务必使用**简体中文**输出，禁止使用英文。`;
         const response = await client.models.generateContent({
             model: modelName, 
             contents: { parts: [{ text: prompt }, ...fileParts] },
@@ -359,7 +384,11 @@ export const streamExpertGeneration = async (
     onToken: (text: string, thought: string) => void
 ) => {
     const wordCountConstraint = `生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。`;
-    const commonRules = `🚨 **核心规范**: 1. 严禁输出 <thinking> 标签。2. 语气符合小红书博主身份。${wordCountConstraint}`;
+    // 🔥 强化中文输出指令
+    const commonRules = `🚨 **核心规范**: 
+    1. **全程必须使用简体中文**，严禁出现大段英文。
+    2. 严禁输出 <thinking> 标签。
+    3. 语气符合小红书博主身份。${wordCountConstraint}`;
     
     let systemText = "";
     if (fidelity === FidelityMode.STRICT) {
@@ -405,7 +434,8 @@ export const streamExpertGeneration = async (
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
         const { client, modelName } = await getAIClient();
-        const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. Notes:\n${samples}`;
+        // 🔥 强化中文输出指令
+        const prompt = `分析以下笔记的人设风格. ⚠️必须使用**简体中文**输出，严禁英文. Notes:\n${samples}`;
         
         // Note: For custom proxies, we rely on the ProxyClient's implementation which doesn't support Typed Schema yet,
         // so we prompt heavily for JSON and parse manually if needed.
