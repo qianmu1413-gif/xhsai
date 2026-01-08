@@ -269,20 +269,23 @@ const getAIClient = async () => {
         throw new Error("❌ 未检测到 API Key。请联系管理员在【系统配置】中填入您的 Gemini API Key。");
     }
 
-    return new GoogleGenAI({ 
-        apiKey: apiKey,
-        baseUrl: baseUrl // 注入代理地址 (e.g. https://api.vectorengine.ai)
-    });
+    return {
+        client: new GoogleGenAI({ 
+            apiKey: apiKey,
+            baseUrl: baseUrl // 注入代理地址 (e.g. https://api.vectorengine.ai)
+        }),
+        modelName: config.gemini.model
+    };
 };
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件可分析";
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const { client, modelName } = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+        const response = await client.models.generateContent({
+            model: modelName, // Use dynamic model name
             contents: { parts: [{ text: prompt }, ...fileParts] },
             config: { temperature: 0.2 }
         });
@@ -385,11 +388,11 @@ ${wordCountConstraint}
     }
 
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const { client, modelName } = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         
-        const response = await ai.models.generateContentStream({
-            model: 'gemini-3-pro-preview',
+        const response = await client.models.generateContentStream({
+            model: modelName, // Use dynamic model name
             contents: { parts: [{ text: context || "请根据提供的背景和资料开始创作。" }, ...fileParts] },
             config: {
                 systemInstruction: systemText,
@@ -420,10 +423,10 @@ ${wordCountConstraint}
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const { client, modelName } = await getAIClient(); // Await 初始化
         const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+        const response = await client.models.generateContent({
+            model: modelName, // Use dynamic model name
             contents: prompt,
             config: {
                 systemInstruction: ANALYSIS_SYSTEM_PROMPT,
@@ -452,9 +455,9 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 
 export const testConnection = async () => {
     try {
-        const ai = await getAIClient(); // Await 初始化
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+        const { client } = await getAIClient(); // Await 初始化
+        const response = await client.models.generateContent({
+            model: 'gemini-3-flash-preview', // Keep lighter model for ping
             contents: 'ping',
             config: { thinkingConfig: { thinkingBudget: 0 } }
         });
