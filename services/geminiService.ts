@@ -258,14 +258,15 @@ const getAIClient = async () => {
     // 从 Supabase 配置中读取，如果没配则使用默认值
     const config = await configRepo.getSystemConfig();
     
-    // 优先使用 Config 中的 Key，没有则尝试环境变量
-    const apiKey = config.gemini.apiKey || process.env.API_KEY;
+    // ⚠️ 严格模式：只使用 Config 中的 Key，绝不回退到环境变量
+    // 这样能确保用户使用的是自己配置的 Key (My API)，而不是开发者预设的 Key (Your API)
+    const apiKey = config.gemini.apiKey;
     
     // ⚠️ 关键：必须使用 BaseURL (代理地址) 来解决国内 Failed to fetch 问题
     const baseUrl = config.gemini.baseUrl;
 
     if (!apiKey) {
-        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key，或检查环境变量。");
+        throw new Error("❌ 未检测到 API Key。请联系管理员在【系统配置】中填入您的 Gemini API Key。");
     }
 
     return new GoogleGenAI({ 
