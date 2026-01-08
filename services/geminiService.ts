@@ -253,35 +253,57 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     }
 };
 
-// 🟢 动态获取 Client，支持从数据库读取 Key 和 BaseURL (代理)
+// 🟢 核心修复：强制代理拦截器
+// 无论 SDK 如何配置，只要发现是 sk- 开头的 Key，就强制把 googleapis.com 替换为代理地址
 const getAIClient = async () => {
-    // 从 Supabase 配置中读取，如果没配则使用默认值
     const config = await configRepo.getSystemConfig();
+    const apiKey = config.gemini.apiKey;
     
-    // 优先使用 Config 中的 Key，没有则尝试环境变量
-    const apiKey = config.gemini.apiKey || process.env.API_KEY;
-    
-    // ⚠️ 关键：必须使用 BaseURL (代理地址) 来解决国内 Failed to fetch 问题
-    const baseUrl = config.gemini.baseUrl;
-
-    if (!apiKey) {
-        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key，或检查环境变量。");
+    // 智能推断 BaseURL：如果是 sk- 开头且没配 BaseURL，强制使用 vectorengine
+    let baseUrl = config.gemini.baseUrl;
+    if (apiKey.startsWith('sk-') && (!baseUrl || baseUrl.includes('googleapis.com') || baseUrl.trim() === "")) {
+        baseUrl = "https://api.vectorengine.ai";
     }
 
-    return new GoogleGenAI({ 
-        apiKey: apiKey,
-        baseUrl: baseUrl // 注入代理地址 (e.g. https://api.vectorengine.ai)
-    });
+    if (!apiKey) {
+        throw new Error("❌ 未检测到 API Key。请联系管理员在【系统配置】中填入您的 Gemini API Key。");
+    }
+
+    // 定义自定义 Fetch，强制拦截所有去往 Google 的请求
+    const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        let urlStr = input.toString();
+        
+        // 🚨 核心拦截逻辑：只要目标是 googleapis.com 且我们有 sk- key，就强制重定向
+        if (urlStr.includes('generativelanguage.googleapis.com')) {
+            // 确保 BaseURL 没有尾部斜杠
+            const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+            // 替换域名
+            urlStr = urlStr.replace('https://generativelanguage.googleapis.com', cleanBaseUrl);
+        }
+        
+        return fetch(urlStr, init);
+    };
+
+    return {
+        client: new GoogleGenAI({ 
+            apiKey: apiKey,
+            // 即使传入 baseUrl，我们也通过 requestOptions.customFetch 做双重保险
+            requestOptions: {
+                customFetch: customFetch
+            }
+        }),
+        modelName: config.gemini.model
+    };
 };
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件可分析";
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const { client, modelName } = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+        const response = await client.models.generateContent({
+            model: modelName, 
             contents: { parts: [{ text: prompt }, ...fileParts] },
             config: { temperature: 0.2 }
         });
@@ -384,11 +406,11 @@ ${wordCountConstraint}
     }
 
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const { client, modelName } = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         
-        const response = await ai.models.generateContentStream({
-            model: 'gemini-3-pro-preview',
+        const response = await client.models.generateContentStream({
+            model: modelName, 
             contents: { parts: [{ text: context || "请根据提供的背景和资料开始创作。" }, ...fileParts] },
             config: {
                 systemInstruction: systemText,
@@ -419,10 +441,10 @@ ${wordCountConstraint}
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const { client, modelName } = await getAIClient(); // Await 初始化
         const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+        const response = await client.models.generateContent({
+            model: modelName, 
             contents: prompt,
             config: {
                 systemInstruction: ANALYSIS_SYSTEM_PROMPT,
@@ -451,9 +473,9 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 
 export const testConnection = async () => {
     try {
-        const ai = await getAIClient(); // Await 初始化
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+        const { client } = await getAIClient(); // Await 初始化
+        const response = await client.models.generateContent({
+            model: 'gemini-3-flash-preview', 
             contents: 'ping',
             config: { thinkingConfig: { thinkingBudget: 0 } }
         });
