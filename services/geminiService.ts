@@ -253,18 +253,19 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     }
 };
 
-// 🟢 核心修复：强制代理拦截器
-// 无论 SDK 如何配置，只要发现是 sk- 开头的 Key，就强制把 googleapis.com 替换为代理地址
+// 🟢 核心修复：强制代理拦截器 (Nucleuar Option)
 const getAIClient = async () => {
     const config = await configRepo.getSystemConfig();
     const apiKey = config.gemini.apiKey;
     
-    // 智能推断 BaseURL：如果是 sk- 开头且没配 BaseURL，强制使用 vectorengine
+    // 🚀 核弹级修复：只要是 sk- 开头的 Key，不管配置里写啥，一律强制走 vectorengine
     let baseUrl = config.gemini.baseUrl;
-    
-    // 如果没有配置 baseUrl 或 显式配置了 googleapis 或 为空
-    if (!baseUrl || baseUrl.includes('googleapis.com') || baseUrl.trim() === "") {
-        // 默认强制指向 vectorengine
+    const isProxyKey = apiKey.startsWith('sk-');
+
+    if (isProxyKey) {
+        baseUrl = "https://api.vectorengine.ai";
+    } else if (!baseUrl || baseUrl.includes('googleapis.com') || baseUrl.trim() === "") {
+        // 如果不是 sk- Key 但也没配 BaseURL，尝试走 vectorengine (防止配置为空)
         baseUrl = "https://api.vectorengine.ai";
     }
 
@@ -276,20 +277,15 @@ const getAIClient = async () => {
     }
 
     // 定义自定义 Fetch，强制拦截所有去往 Google 的请求
+    // 这是为了防止 SDK 内部写死了 googleapis.com 导致绕过 baseUrl
     const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         let urlStr = input.toString();
         
         // 🚨 核心拦截逻辑：只要目标是 googleapis.com，就强制重定向到我们配置的 baseUrl
         if (urlStr.includes('generativelanguage.googleapis.com')) {
-            // SDK 默认请求类似: https://generativelanguage.googleapis.com/v1beta/models/...
-            // 我们将其替换为: [baseUrl]/v1beta/models/...
-            
-            // 1. 简单替换 Host
-            urlStr = urlStr.replace('https://generativelanguage.googleapis.com', baseUrl);
-            
-            // 2. 如果 baseUrl 已经包含了 /v1 或 /v1beta，SDK 又加了一遍，需要去重 (简单处理)
-            // 例如 baseUrl = .../v1, urlStr 变成了 .../v1/v1beta... -> .../v1/models... (取决于代理服务的要求)
-            // 针对 Vectorengine，通常只需要替换 Host 即可，它支持标准的 /v1beta 路径
+            // 正则替换：将 https://generativelanguage.googleapis.com 替换为 baseUrl
+            // 这样可以保留后续的 /v1beta/models/... 路径
+            urlStr = urlStr.replace(/^https?:\/\/generativelanguage\.googleapis\.com/, baseUrl);
         }
         
         // 🚨 确保不发送 Credentials 以避免 CORS 问题 (中转服务通常不支持)

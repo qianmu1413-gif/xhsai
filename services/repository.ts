@@ -36,7 +36,7 @@ export const getErrorMessage = (error: any): string => {
 // 🟢 针对 vectorengine.ai 优化的默认配置
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
-        apiKey: "", // ⚠️ 请在管理后台填入 Key
+        apiKey: "", 
         baseUrl: "https://api.vectorengine.ai", // 强制默认使用中转地址
         model: "gemini-3-flash-preview" 
     },
@@ -69,14 +69,14 @@ export const configRepo = {
                 const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
                 
                 // 🛡️ 强制修正：如果 BaseURL 是空的，或者是 Google 原生地址，强制切回 vectorengine
-                // 只要不用这个地址，任何中转 Key 都无法工作
                 if (!geminiConfig.baseUrl || geminiConfig.baseUrl.trim() === "" || geminiConfig.baseUrl.includes('googleapis.com')) {
                     geminiConfig.baseUrl = "https://api.vectorengine.ai";
                 }
                 
-                // 额外的安全网：如果 Key 是 sk- 开头，再次强制确认 baseUrl
+                // 🛡️ 双重保险：如果 Key 是 sk- 开头 (中转Key)，且 URL 不包含 vector/api 字眼，强制覆盖
                 if (geminiConfig.apiKey && geminiConfig.apiKey.startsWith('sk-')) {
-                     if (!geminiConfig.baseUrl.includes('vectorengine') && !geminiConfig.baseUrl.includes('api')) {
+                     // 只要当前配置不是 vectorengine，就强制改成 vectorengine
+                     if (!geminiConfig.baseUrl.includes('vectorengine')) {
                          geminiConfig.baseUrl = "https://api.vectorengine.ai";
                      }
                 }
@@ -107,7 +107,7 @@ export const configRepo = {
         // 保存前自动清理 BaseURL 格式
         if (config.gemini.baseUrl) {
             config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/$/, ''); // 去除尾部斜杠
-            config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/v1beta$/, ''); // 去除可能的版本号，SDK会自动加
+            config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/v1beta$/, ''); // 去除可能的版本号
             config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/v1$/, ''); 
         }
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, SystemConfig, Project } from '../types';
 import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon } from 'lucide-react';
@@ -439,6 +440,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   <div className="flex justify-between items-center mb-1.5">
                                       <label className="text-xs font-medium text-slate-400">Gateway Status</label>
                                       <span className={`text-[10px] px-2 py-0.5 rounded ${sysStatus.success ? 'bg-emerald-950 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>{sysStatus.message}</span>
+                                  </div>
+                              </div>
+                              
+                              {/* 🟢 NEW: API Key Input Field */}
+                              <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key (Gemini/VectorEngine)</label>
+                                  <div className="relative">
+                                       <input 
+                                          type="password" 
+                                          value={sysConfig.gemini.apiKey} 
+                                          onChange={e => updateConfig('gemini', 'apiKey', e.target.value)} 
+                                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all pr-10" 
+                                          placeholder="sk-..." 
+                                      />
+                                      <div className="absolute right-3 top-2 text-slate-500"><Key size={12}/></div>
                                   </div>
                               </div>
                               
