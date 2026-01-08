@@ -442,11 +442,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   </div>
                               </div>
                               
-                              <div>
-                                  <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key (Gemini Pro)</label>
-                                  <input type="password" value={sysConfig.gemini.apiKey} onChange={e => updateConfig('gemini', 'apiKey', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 transition-all placeholder:text-slate-700 font-mono" placeholder="sk-..." />
-                              </div>
-
                               <div className="grid grid-cols-2 gap-4">
                                   <div>
                                       <label className="text-xs font-medium text-slate-400 block mb-1.5">Base URL (网关地址)</label>

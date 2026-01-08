@@ -63,24 +63,10 @@ export const configRepo = {
             const { data } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
             if (data?.value) {
                 const loaded = data.value;
-                // Merge logic: Use loaded value if present, otherwise default
-                // Critical: If loaded value is an empty string, we MUST fallback to default for BaseURL/Model
-                // to prevent SDK connecting to default Google endpoint with an invalid proxy key.
-                
-                const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
-                if (!geminiConfig.baseUrl || geminiConfig.baseUrl.trim() === "") geminiConfig.baseUrl = DEFAULT_CONFIG.gemini.baseUrl;
-                if (!geminiConfig.model || geminiConfig.model.trim() === "") geminiConfig.model = DEFAULT_CONFIG.gemini.model;
-
-                const xhsConfig = { ...DEFAULT_CONFIG.xhs, ...(loaded.xhs || {}) };
-                if (!xhsConfig.apiUrl || xhsConfig.apiUrl.trim() === "") xhsConfig.apiUrl = DEFAULT_CONFIG.xhs.apiUrl;
-
-                const publishConfig = { ...DEFAULT_CONFIG.publish, ...(loaded.publish || {}) };
-                if (!publishConfig.targetUrl || publishConfig.targetUrl.trim() === "") publishConfig.targetUrl = DEFAULT_CONFIG.publish.targetUrl;
-
                 return {
-                    gemini: geminiConfig,
-                    xhs: xhsConfig,
-                    publish: publishConfig,
+                    gemini: { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) },
+                    xhs: { ...DEFAULT_CONFIG.xhs, ...(loaded.xhs || {}) },
+                    publish: { ...DEFAULT_CONFIG.publish, ...(loaded.publish || {}) },
                     cos: { ...DEFAULT_CONFIG.cos, ...(loaded.cos || {}) }
                 };
             }
@@ -142,13 +128,20 @@ export const userRepo = {
         const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
         
         if (rpcError) {
+             // 错误代码字典: 
+             // 42883: function does not exist (函数不存在)
+             // 42P13: function argument/return type mismatch (参数/返回不匹配)
+             // 42804: datatype mismatch (uuid vs text) (类型不匹配)
              const schemaErrors = ['42883', '42P13', '42804'];
              const isSchemaError = schemaErrors.includes(rpcError.code) || 
                                    rpcError.message?.includes('structure of query does not match') ||
                                    rpcError.details?.includes('does not match expected type');
              
+             // 如果是数据库结构错误，自动降级为直接查询
              if (isSchemaError) {
                  console.warn(`RPC Interface Mismatch (${rpcError.code}), switching to direct query fallback.`);
+                 
+                 // 🟡 2. 降级方案: 直接查询 profiles 表
                  const { data: directData, error: directError } = await supabase
                     .from('profiles')
                     .select('*')
@@ -282,7 +275,7 @@ export const userRepo = {
   },
 };
 
-// --- FILE / LINK / PROJECT REPOS ---
+// --- FILE / LINK / PROJECT REPOS (Shortened for brevity but functional) ---
 export const fileRepo = {
     saveUpload: async (userId: string, fileRecord: Partial<UserUpload>) => {
         if (!supabase) return;
@@ -318,6 +311,9 @@ export const projectRepo = {
 
   saveProject: async (userId: string, project: Project): Promise<string | null> => {
     if (!supabase) return null;
+    
+    // 如果是临时ID (temp-开头)，则生成一个新的 UUID 作为数据库主键
+    // 如果是现有ID，则保持不变
     const isNew = project.id.startsWith('temp-');
     const finalId = isNew ? safeUUID() : project.id;
 
