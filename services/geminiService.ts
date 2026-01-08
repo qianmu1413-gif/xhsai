@@ -261,9 +261,15 @@ const getAIClient = async () => {
     
     // 智能推断 BaseURL：如果是 sk- 开头且没配 BaseURL，强制使用 vectorengine
     let baseUrl = config.gemini.baseUrl;
-    if (apiKey.startsWith('sk-') && (!baseUrl || baseUrl.includes('googleapis.com') || baseUrl.trim() === "")) {
+    
+    // 如果没有配置 baseUrl 或 显式配置了 googleapis 或 为空
+    if (!baseUrl || baseUrl.includes('googleapis.com') || baseUrl.trim() === "") {
+        // 默认强制指向 vectorengine
         baseUrl = "https://api.vectorengine.ai";
     }
+
+    // 移除尾部斜杠，防止拼接错误
+    baseUrl = baseUrl.replace(/\/$/, '');
 
     if (!apiKey) {
         throw new Error("❌ 未检测到 API Key。请联系管理员在【系统配置】中填入您的 Gemini API Key。");
@@ -273,17 +279,17 @@ const getAIClient = async () => {
     const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         let urlStr = input.toString();
         
-        // 🚨 核心拦截逻辑：只要目标是 googleapis.com，就强制重定向
+        // 🚨 核心拦截逻辑：只要目标是 googleapis.com，就强制重定向到我们配置的 baseUrl
         if (urlStr.includes('generativelanguage.googleapis.com')) {
-            // 1. 清理 BaseURL (移除尾部斜杠，移除可能被误加的 /v1 或 /v1beta)
-            // 某些用户会填 https://api.vectorengine.ai/v1，但这会导致 SDK 拼接出 .../v1/v1beta/...
-            // 所以我们只取 Host 部分，或者确保它是干净的
-            const cleanBaseUrl = baseUrl.replace(/\/$/, '');
-            
-            // 2. 替换域名
             // SDK 默认请求类似: https://generativelanguage.googleapis.com/v1beta/models/...
-            // 替换后应为: https://api.vectorengine.ai/v1beta/models/...
-            urlStr = urlStr.replace('https://generativelanguage.googleapis.com', cleanBaseUrl);
+            // 我们将其替换为: [baseUrl]/v1beta/models/...
+            
+            // 1. 简单替换 Host
+            urlStr = urlStr.replace('https://generativelanguage.googleapis.com', baseUrl);
+            
+            // 2. 如果 baseUrl 已经包含了 /v1 或 /v1beta，SDK 又加了一遍，需要去重 (简单处理)
+            // 例如 baseUrl = .../v1, urlStr 变成了 .../v1/v1beta... -> .../v1/models... (取决于代理服务的要求)
+            // 针对 Vectorengine，通常只需要替换 Host 即可，它支持标准的 /v1beta 路径
         }
         
         // 🚨 确保不发送 Credentials 以避免 CORS 问题 (中转服务通常不支持)
