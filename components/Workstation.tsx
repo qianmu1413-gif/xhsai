@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { PersonaAnalysis, FidelityMode, ChatMessage, Project, NoteDraft, User, BulkNote, AttachedFile, SocialNote, PublishedRecord, PreviewState } from '../types';
 import { streamExpertGeneration, streamPersonaAnalysis, analyzeMaterials } from '../services/geminiService';
@@ -167,26 +168,38 @@ const getLength = (str: string) => {
   return Math.ceil(len);
 };
 
-// 🟢 动态思考状态组件
+// 🟢 动态思考状态组件 (特效升级版)
 const ThinkingIndicator = () => {
-    const [text, setText] = useState("正在连接 AI 大脑...");
+    const [step, setStep] = useState(0);
+    const steps = [
+        "正在建立神经连接 (Neural Handshake)...",
+        "正在解构上下文语境 (Context Analysis)...",
+        "正在检索风格记忆库 (Style Retrieval)...",
+        "正在构建思维链 (Chain of Thought)...",
+        "正在拟定创意切入点 (Creative Spark)...",
+        "正在优化表达措辞 (Polishing)..."
+    ];
+
     useEffect(() => {
-        const steps = ["正在连接 AI 大脑...", "正在深度分析上下文...", "正在构思创意切入点...", "正在撰写笔记...", "即将完成..."];
-        let i = 0;
         const interval = setInterval(() => {
-            i = (i + 1) % steps.length;
-            setText(steps[i]);
-        }, 3000);
+            setStep((prev) => (prev + 1) % steps.length);
+        }, 800);
         return () => clearInterval(interval);
     }, []);
 
     return (
-        <div className="flex items-center gap-2.5 opacity-80 bg-slate-50 border border-slate-100 px-4 py-3 rounded-xl w-fit animate-fade-in">
-            <div className="relative">
-                <div className="w-3 h-3 bg-rose-500 rounded-full animate-ping absolute inset-0 opacity-20"></div>
-                <Loader2 size={14} className="animate-spin text-rose-500 relative z-10"/>
+        <div className="flex items-center gap-3 bg-gradient-to-r from-violet-50 to-fuchsia-50 border border-violet-100 px-4 py-3 rounded-xl w-fit animate-fade-in select-none shadow-sm shadow-violet-100/50">
+            <div className="relative flex items-center justify-center w-5 h-5">
+                {/* 神经脉冲动画 */}
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-20"></span>
+                <BrainCircuit size={16} className="text-violet-600 relative z-10 animate-pulse" />
             </div>
-            <span className="text-xs font-bold text-slate-500 animate-pulse">{text}</span>
+            <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-0.5 leading-none">AI Neural Process</span>
+                <span className="text-xs font-medium text-slate-700 min-w-[180px] transition-all duration-300">
+                    {steps[step]}
+                </span>
+            </div>
         </div>
     );
 };

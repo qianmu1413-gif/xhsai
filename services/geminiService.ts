@@ -156,13 +156,59 @@ class ProxyClient {
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
     let cleaned = text;
+
+    // 🔥 1. 移除思维链标签
     cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
     cleaned = cleaned.replace(/\[\[THOUGHT\]\][\s\S]*?\[\[\/THOUGHT\]\]/gi, "");
-    cleaned = cleaned.replace(/^(Here is (the|a)|Sure, here is|Okay, here is|Based on the content).*?:/gmi, "");
+    cleaned = cleaned.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
+    
+    // 🔥 2. 靶向移除特定的英文旁白模式
+    const narrativeRegex = /^(My current task|I am|I'm|I have|I've|Refining|Developing|Creating|Now,|My goal|This post|The content|Based on)[\s\S]*?(\n|$)/gim;
+    cleaned = cleaned.replace(narrativeRegex, "");
+    
+    // 🔥 3. 【中文锚点截断法】 - 终极过滤方案
+    // 逻辑：寻找第一个中文字符。如果前面有大段英文，直接切除。
+    const lines = cleaned.split('\n');
+    const filteredLines = [];
+    let contentStarted = false;
+    
+    // 检测中文的正则
+    const hasChinese = /[\u4e00-\u9fa5]/;
+    // 检测 Emoji 的正则
+    const hasEmoji = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
+    
+    for (const line of lines) {
+         const trimmed = line.trim();
+         if (!trimmed) continue;
+
+         if (!contentStarted) {
+             // 如果这一行包含中文，标记正文开始
+             if (hasChinese.test(trimmed)) {
+                 contentStarted = true;
+                 filteredLines.push(line);
+             } 
+             // 如果是 Emoji 开头且没有大量英文（防止 "Analyzing 🧐..." 这种），也标记开始
+             else if (hasEmoji.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed)) {
+                  contentStarted = true;
+                  filteredLines.push(line);
+             }
+             // 否则，这行就是英文废话，丢弃
+         } else {
+             // 正文已经开始，保留后续所有内容
+             filteredLines.push(line);
+         }
+    }
+    
+    if (filteredLines.length > 0) {
+        cleaned = filteredLines.join('\n');
+    }
+
+    // 最后的清理
+    cleaned = cleaned.replace(/^#+\s*(Analysis|Thinking Process|Plan|Strategy).*$/gmi, "");
     cleaned = cleaned.replace(/\*\*Persona\*\*:/gi, "**人设定位**:");
     cleaned = cleaned.replace(/\*\*Topic\*\*:/gi, "**主题分析**:");
     cleaned = cleaned.replace(/\*\*Target Audience\*\*:/gi, "**目标人群**:");
-    cleaned = cleaned.replace(/\*\*Key Data\*\*:/gi, "**核心数据**:");
+    
     return cleaned.trim();
 };
 
@@ -340,8 +386,15 @@ export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> =
     try {
         const { client, modelName } = await getAIClient();
         const fileParts = await Promise.all(files.map(prepareFilePart));
-        // 🔥 强化中文输出指令
-        const prompt = `分析提供的素材，提取核心营销卖点。⚠️请务必使用**简体中文**输出，禁止使用英文。`;
+        // 🔥 强化中文输出指令 - 强制翻译模式
+        const prompt = `Task: Analyze the provided materials.
+Output Language: Simplified Chinese (简体中文).
+
+CRITICAL INSTRUCTION: 
+Even if the source material is in English, you MUST translate your analysis into Simplified Chinese.
+Do NOT output any English text in the final response.
+Start the response immediately with the analysis in Chinese.`;
+
         const response = await client.models.generateContent({
             model: modelName, 
             contents: { parts: [{ text: prompt }, ...fileParts] },
@@ -384,32 +437,53 @@ export const streamExpertGeneration = async (
     onToken: (text: string, thought: string) => void
 ) => {
     const wordCountConstraint = `生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。`;
-    // 🔥 强化中文输出指令
-    const commonRules = `🚨 **核心规范**: 
-    1. **全程必须使用简体中文**，严禁出现大段英文。
-    2. 严禁输出 <thinking> 标签。
-    3. 语气符合小红书博主身份。${wordCountConstraint}`;
     
-    let systemText = "";
+    // 🔥 核弹级 System Instruction：定义为 API，开启静默模式，禁止旁白
+    const strictSystemPrompt = `Role: Professional Chinese Copywriting Engine for Xiaohongshu (RedNote).
+Task: Generate high-quality social media content based on the user's input.
+
+⚠️ FATAL RULES (SILENT MODE ON):
+1. **LANGUAGE**: Output MUST be in **Simplified Chinese (简体中文)** ONLY.
+2. **NO NARRATION**: Absolutely NO "I am writing...", "My current task...", "Refining...". You are NOT a chatbot.
+3. **NO ANALYSIS**: Do NOT output your thinking process or draft plan.
+4. **FORMAT**: Start strictly with the **Title** (containing Emojis).
+5. **ACTION**: Just output the final result directly.
+
+${wordCountConstraint}
+`;
+    
+    let systemText = strictSystemPrompt;
+
     if (fidelity === FidelityMode.STRICT) {
-        systemText = `【角色】：专业内容重构专家。\n${commonRules}\n1. **绝对忠实于素材**。2. **严禁虚构**。`;
+        systemText += `\n【风格】: 严谨、专业、干货满满。`;
     } else {
-        systemText = `【角色】：亲切真实的个人号博主。\n${commonRules}\n1. 语气口语化。2. 适当发挥。`;
+        systemText += `\n【风格】: 活泼、网感强、像闺蜜聊天。`;
     }
 
-    if (personaPrompt) systemText += `\n\n【风格指令】:\n${personaPrompt}`;
+    if (personaPrompt) systemText += `\n\n【人设指令 (Apply in Chinese)】:\n${personaPrompt}`;
 
     if (count > 1) {
-        systemText += `\n\n🚨 **批量生成指令**:\n请生成 ${count} 篇角度不同的笔记。输出格式：\n### 方案1\n标题：...\n正文：...\n### 方案2...`;
+        systemText += `\n\n【批量生成模式】: 请生成 ${count} 个不同版本。格式如下:\n### 方案1\n标题：...\n正文：...\n### 方案2...`;
     }
 
     try {
         const { client, modelName } = await getAIClient();
         const fileParts = await Promise.all(files.map(prepareFilePart));
         
+        // 核心修改：在 User Prompt 中再次强调禁止废话
+        const strictUserPrompt = `${context || "开始创作（请使用中文）。"}
+        
+-----------------------------------------
+[STRICT OUTPUT FORMAT]
+Start DIRECTLY with the Title and Content in Simplified Chinese.
+DO NOT say "My task is...", "Developing content", or "Refining".
+SILENCE MODE: ENABLED.
+-----------------------------------------
+`;
+
         const response = await client.models.generateContentStream({
             model: modelName, 
-            contents: { parts: [{ text: context || "开始创作。" }, ...fileParts] },
+            contents: { parts: [{ text: strictUserPrompt }, ...fileParts] },
             config: {
                 systemInstruction: systemText,
                 temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.9 
@@ -421,13 +495,15 @@ export const streamExpertGeneration = async (
             const text = chunk.text;
             if (text) {
                 fullText += text;
+                // 实时清洗，防止用户看到英文开头
                 onToken(cleanText(fullText), "");
             }
         }
 
         let parsedNotes: BulkNote[] = [];
-        if (count > 1) parsedNotes = parseBulkNotes(cleanText(fullText));
-        return { dialogueText: cleanText(fullText), thought: "", notes: parsedNotes };
+        const finalCleanText = cleanText(fullText);
+        if (count > 1) parsedNotes = parseBulkNotes(finalCleanText);
+        return { dialogueText: finalCleanText, thought: "", notes: parsedNotes };
     } catch (e: any) { return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] }; }
 };
 
@@ -435,10 +511,16 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
     try {
         const { client, modelName } = await getAIClient();
         // 🔥 强化中文输出指令
-        const prompt = `分析以下笔记的人设风格. ⚠️必须使用**简体中文**输出，严禁英文. Notes:\n${samples}`;
+        const prompt = `Task: Analyze the writing style of the provided text.
+Output Language: Simplified Chinese (简体中文).
+
+Rules:
+1. Translate all analysis terms (Tone, Keywords, etc.) to Chinese.
+2. Do NOT output "Analyzing..." or any preamble.
+3. Return the JSON object directly.
+
+Samples:\n${samples}`;
         
-        // Note: For custom proxies, we rely on the ProxyClient's implementation which doesn't support Typed Schema yet,
-        // so we prompt heavily for JSON and parse manually if needed.
         const response = await client.models.generateContent({
             model: modelName, 
             contents: prompt,
