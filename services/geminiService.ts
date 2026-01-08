@@ -273,15 +273,23 @@ const getAIClient = async () => {
     const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         let urlStr = input.toString();
         
-        // 🚨 核心拦截逻辑：只要目标是 googleapis.com 且我们有 sk- key，就强制重定向
+        // 🚨 核心拦截逻辑：只要目标是 googleapis.com，就强制重定向
         if (urlStr.includes('generativelanguage.googleapis.com')) {
-            // 确保 BaseURL 没有尾部斜杠
+            // 1. 清理 BaseURL (移除尾部斜杠，移除可能被误加的 /v1 或 /v1beta)
+            // 某些用户会填 https://api.vectorengine.ai/v1，但这会导致 SDK 拼接出 .../v1/v1beta/...
+            // 所以我们只取 Host 部分，或者确保它是干净的
             const cleanBaseUrl = baseUrl.replace(/\/$/, '');
-            // 替换域名
+            
+            // 2. 替换域名
+            // SDK 默认请求类似: https://generativelanguage.googleapis.com/v1beta/models/...
+            // 替换后应为: https://api.vectorengine.ai/v1beta/models/...
             urlStr = urlStr.replace('https://generativelanguage.googleapis.com', cleanBaseUrl);
         }
         
-        return fetch(urlStr, init);
+        // 🚨 确保不发送 Credentials 以避免 CORS 问题 (中转服务通常不支持)
+        const newInit = { ...init, credentials: 'omit' as RequestCredentials };
+        
+        return fetch(urlStr, newInit);
     };
 
     return {

@@ -33,11 +33,12 @@ export const getErrorMessage = (error: any): string => {
 };
 
 // 默认配置 (敏感信息已移除，必须从数据库加载)
+// 🟢 针对 vectorengine.ai 优化的默认配置
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
-        apiKey: "", 
-        baseUrl: "https://api.vectorengine.ai", 
-        model: "gemini-3-flash-preview" 
+        apiKey: "", // ⚠️ 请在此处填入您的 sk-xxxxxxxx 密钥，或者在网页后台配置
+        baseUrl: "https://api.vectorengine.ai", // 强制使用中转地址
+        model: "gemini-3-flash-preview" // 默认模型，可根据 vectorengine 支持列表修改
     },
     xhs: { 
         apiKey: "", 
@@ -66,8 +67,9 @@ export const configRepo = {
                 
                 // 🟢 智能合并逻辑：防止数据库中的空字符串覆盖默认的 Proxy URL
                 const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
-                if (!geminiConfig.baseUrl || geminiConfig.baseUrl.trim() === "") {
-                    geminiConfig.baseUrl = DEFAULT_CONFIG.gemini.baseUrl;
+                if (!geminiConfig.baseUrl || geminiConfig.baseUrl.trim() === "" || geminiConfig.baseUrl.includes('googleapis.com')) {
+                    // 如果数据库里是空的或者还是 google 原生地址，强制切回 vectorengine
+                    geminiConfig.baseUrl = "https://api.vectorengine.ai";
                 }
                 if (!geminiConfig.model || geminiConfig.model.trim() === "") {
                     geminiConfig.model = DEFAULT_CONFIG.gemini.model;
@@ -75,6 +77,7 @@ export const configRepo = {
 
                 // 🛡️ 安全检查：如果使用 sk- 开头的 Key (中转Key)，必须强制检查 BaseURL
                 if (geminiConfig.apiKey && geminiConfig.apiKey.startsWith('sk-')) {
+                     // 再次确保 BaseURL 指向代理
                      if (!geminiConfig.baseUrl || geminiConfig.baseUrl.includes('googleapis.com')) {
                          geminiConfig.baseUrl = "https://api.vectorengine.ai";
                      }
@@ -99,6 +102,10 @@ export const configRepo = {
 
     saveSystemConfig: async (config: SystemConfig) => {
         if (!supabase) throw new Error("请先连接数据库");
+        // 保存前简单清洗一下 BaseURL
+        if (config.gemini.baseUrl) {
+            config.gemini.baseUrl = config.gemini.baseUrl.replace(/\/$/, ''); // 去除尾部斜杠
+        }
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) throw new Error(getErrorMessage(error));
     }

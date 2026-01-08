@@ -9,7 +9,7 @@ import { DEFAULT_MANUAL_PERSONA, DEFAULT_CONTENT_PLACEHOLDER } from '../constant
 import MobilePreview from './MobilePreview';
 import PersonaTrainer from './PersonaTrainer';
 import Toast, { ToastState } from './Toast';
-import { Send, FileText, Sparkles, Loader2, Plus, ChevronDown, ArrowLeft, Wand2, Archive, X, Paperclip, File as FileIcon, Trash2, User as UserIcon, Bot, LogOut, Flame, LayoutGrid, MessageSquareText, Zap, Command, SlidersHorizontal, PanelRightClose, PanelRightOpen, ArrowUpRight, BrainCircuit, ChevronLeft, ChevronRight, Cloud, UploadCloud, CheckCircle2, AlertCircle, Copy, Check, Library, Image as ImageIcon, QrCode, Search, Link as LinkIcon, Edit2, Layers, History, Settings2, Link, Download, Share2, MoreHorizontal, CheckSquare, Square, Terminal, Clock, Hash, Tag, Folder, MonitorPlay, Pencil, Heart, Info, FileQuestion, AlignLeft, DownloadCloud, Save, WifiOff, Database } from 'lucide-react';
+import { Send, FileText, Sparkles, Loader2, Plus, ChevronDown, ArrowLeft, Wand2, Archive, X, Paperclip, File as FileIcon, Trash2, User as UserIcon, Bot, LogOut, Flame, LayoutGrid, MessageSquareText, Zap, Command, SlidersHorizontal, PanelRightClose, PanelRightOpen, ArrowUpRight, BrainCircuit, ChevronLeft, ChevronRight, Cloud, UploadCloud, CheckCircle2, AlertCircle, Copy, Check, Library, Image as ImageIcon, QrCode, Search, Link as LinkIcon, Edit2, Layers, History, Settings2, Link, Download, Share2, MoreHorizontal, CheckSquare, Square, Terminal, Clock, Hash, Tag, Folder, MonitorPlay, Pencil, Heart, Info, FileQuestion, AlignLeft, DownloadCloud, Save, WifiOff } from 'lucide-react';
 
 // ... (keep PDF.js init and other helper functions)
 if (typeof window !== 'undefined' && (window as any).pdfjsLib) {
@@ -17,6 +17,7 @@ if (typeof window !== 'undefined' && (window as any).pdfjsLib) {
 }
 
 const RANDOM_COVERS = [
+  // ... (keep all covers)
   "https://images.unsplash.com/photo-1600093463592-8e36ae95ef56?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1554118811-1e0d58224f24?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?q=80&w=1000&auto=format&fit=crop",
@@ -25,6 +26,8 @@ const RANDOM_COVERS = [
   "https://images.unsplash.com/photo-1507652313519-d4e9174996dd?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1511920170033-f8396924c348?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1463797221720-6b07e6426c24?q=80&w=1000&auto=format&fit=crop",
+  
+  // 2. Minimal & Tech & Workspace
   "https://images.unsplash.com/photo-1497215728101-856f4ea42174?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1493612276216-ee3925520721?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1485627658391-1365e4e0dbfe?q=80&w=1000&auto=format&fit=crop",
@@ -33,6 +36,8 @@ const RANDOM_COVERS = [
   "https://images.unsplash.com/photo-1499951360447-b19be8fe80f5?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1515378791036-0648a3ef77b2?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1483058712412-4245e9b90334?q=80&w=1000&auto=format&fit=crop",
+
+  // 3. Nature & Travel
   "https://images.unsplash.com/photo-1516483638261-f4dbaf036963?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1000&auto=format&fit=crop",
@@ -41,6 +46,8 @@ const RANDOM_COVERS = [
   "https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?q=80&w=1000&auto=format&fit=crop",
+
+  // 4. Aesthetic & Soft & Fashion
   "https://images.unsplash.com/photo-1516961642265-531546e84af2?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1499916078039-922301b0eb9b?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1502082553048-f009c37129b9?q=80&w=1000&auto=format&fit=crop",
@@ -49,6 +56,8 @@ const RANDOM_COVERS = [
   "https://images.unsplash.com/photo-1512436991641-6745cdb1723f?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=1000&auto=format&fit=crop",
+
+  // 5. Abstract & Texture & Art
   "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=1000&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?q=80&w=1000&auto=format&fit=crop",
@@ -60,20 +69,45 @@ const RANDOM_COVERS = [
 
 const getRandomCover = () => RANDOM_COVERS[Math.floor(Math.random() * RANDOM_COVERS.length)];
 
+const getTagColor = (tag: string) => {
+  const colors = [
+    'bg-red-50 text-red-600 border-red-100',
+    'bg-orange-50 text-orange-600 border-orange-100',
+    'bg-amber-50 text-amber-600 border-amber-100',
+    'bg-green-50 text-green-600 border-green-100',
+    'bg-emerald-50 text-emerald-600 border-emerald-100',
+    'bg-teal-50 text-teal-600 border-teal-100',
+    'bg-cyan-50 text-cyan-600 border-cyan-100',
+    'bg-blue-50 text-blue-600 border-blue-100',
+    'bg-indigo-50 text-indigo-600 border-indigo-100',
+    'bg-violet-50 text-violet-600 border-violet-100',
+    'bg-purple-50 text-purple-600 border-purple-100',
+    'bg-fuchsia-50 text-fuchsia-600 border-fuchsia-100',
+    'bg-pink-50 text-pink-600 border-pink-100',
+    'bg-rose-50 text-rose-600 border-rose-100',
+  ];
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = tag.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
 interface WorkstationProps {
   user: User;
   onUserUpdate: (updatedUser: User) => void;
   onLogout: () => void;
 }
 
+// 🟢 升级：文本清洗工具
 const cleanMarkdown = (text: string) => {
   if (!text) return "";
   return text
-    .replace(/\*\*/g, "")
-    .replace(/__/g, "") 
-    .replace(/^#+\s/gm, "")
-    .replace(/###/g, "")
-    .replace(/`/g, "")
+    .replace(/\*\*/g, "")      // 移除粗体
+    .replace(/__/g, "")        // 移除斜体/粗体
+    .replace(/^#+\s/gm, "")    // 移除行首的标题符号 (# H1, ## H2)
+    .replace(/###/g, "")       // 移除文中可能残留的 ###
+    .replace(/`/g, "")         // 移除代码块符号
     .trim();
 };
 
@@ -133,6 +167,7 @@ const getLength = (str: string) => {
   return Math.ceil(len);
 };
 
+// 🟢 动态思考状态组件
 const ThinkingIndicator = () => {
     const [text, setText] = useState("正在连接 AI 大脑...");
     useEffect(() => {
@@ -156,6 +191,7 @@ const ThinkingIndicator = () => {
     );
 };
 
+// 🟢 错误显示组件
 const ErrorDisplay = ({ error }: { error: string }) => {
     let friendlyError = error;
     if (error.includes('Failed to fetch')) {
@@ -185,15 +221,17 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                 </div>
             </div>
             ) : (
-            <div className="flex items-start gap-4 max-w-full lg:max-w-[95%]">
+            <div className="flex items-start gap-4 max-w-full lg:max-w-[90%]">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center shadow-lg shrink-0 mt-1 ${msg.isError ? 'bg-red-100 text-red-500 shadow-red-100' : 'bg-gradient-to-br from-rose-500 to-orange-500 shadow-rose-200'}`}>
                     {msg.isError ? <AlertCircle size={16}/> : <Sparkles size={14} className="text-white" />}
                 </div>
                 <div className="flex-1 flex flex-col gap-3 min-w-0">
+                    {/* 🟢 优化：加载状态展示 */}
                     {msg.isStreaming && !msg.text && !msg.isError && (
                         <ThinkingIndicator />
                     )}
                     
+                    {/* 🟢 优化：错误状态展示 */}
                     {msg.isError ? (
                         <ErrorDisplay error={msg.text} />
                     ) : (
@@ -206,53 +244,30 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                                     <div className="absolute top-4 right-4 opacity-0 group-hover/card:opacity-100 transition-opacity"><CopyButton text={msg.text} /></div>
                                 </div>
                             )}
-                            
-                            {/* 🟢 优化后的批量生成卡片展示区 */}
                             {msg.bulkNotes && msg.bulkNotes.length > 0 && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 mt-2">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
                                     {msg.bulkNotes.map((note, idx) => {
                                         const titleLen = getLength(note.title);
                                         const contentLen = getLength(note.content);
-                                        const isTitleLong = titleLen > 20;
                                         return (
-                                        <div key={idx} className="bg-white rounded-2xl p-0 border border-slate-200 shadow-sm hover:shadow-xl hover:border-rose-300 transition-all flex flex-col relative overflow-hidden group/option ring-1 ring-transparent hover:ring-rose-100">
-                                            {/* Header Section */}
-                                            <div className="bg-slate-50/50 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-md">方案 #{idx+1}</span>
-                                                </div>
-                                                <button 
-                                                    onClick={() => onAdopt(note)} 
-                                                    className="text-[10px] bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white px-2.5 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 active:scale-95 shadow-sm"
-                                                >
-                                                    <ArrowUpRight size={12}/> 填入编辑器
-                                                </button>
-                                            </div>
-
-                                            {/* Metrics Dashboard */}
-                                            <div className="px-4 py-2 bg-slate-50/30 border-b border-slate-50 flex gap-4 text-[10px] font-mono text-slate-500">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                                                    <span>标题字数: <strong className={isTitleLong ? "text-red-500" : "text-slate-700"}>{titleLen}</strong></span>
-                                                </div>
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                                    <span>正文字数: <strong className="text-slate-700">{contentLen}</strong></span>
-                                                </div>
-                                            </div>
-
-                                            {/* Content Preview */}
-                                            <div className="p-5 flex-1 flex flex-col gap-3">
-                                                <div>
-                                                    <h4 className="font-bold text-sm text-slate-900 leading-snug mb-1">{cleanMarkdown(note.title)}</h4>
-                                                </div>
-                                                <div className="flex-1 relative">
-                                                    <div className="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap line-clamp-[8] font-medium opacity-80">
-                                                        {cleanMarkdown(note.content)}
+                                        <div key={idx} className="bg-white rounded-xl p-5 border border-slate-200 hover:border-rose-400 hover:shadow-lg transition-all cursor-pointer group/option relative overflow-hidden active:scale-[0.98]" onClick={() => onAdopt(note)}>
+                                            <div className="absolute top-0 right-0 p-2 opacity-0 group-hover/option:opacity-100 transition-opacity z-10"><span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg shadow-rose-200 flex items-center gap-1"><ArrowUpRight size={10}/> 填入编辑器</span></div>
+                                            <div className="flex items-center justify-between mb-3 border-b border-slate-50 pb-2">
+                                                <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">方案 #{idx+1}</span>
+                                                <div className="flex gap-1.5">
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="text-[9px] text-slate-400">标题</span>
+                                                        <span className={`text-[10px] font-bold font-mono ${titleLen > 20 ? 'text-red-500' : 'text-slate-600'}`}>{titleLen}</span>
                                                     </div>
-                                                    <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none"></div>
+                                                    <div className="w-[1px] h-6 bg-slate-100 mx-1"></div>
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="text-[9px] text-slate-400">正文</span>
+                                                        <span className="text-[10px] font-bold font-mono text-slate-600">{contentLen}</span>
+                                                    </div>
                                                 </div>
                                             </div>
+                                            <h4 className="font-bold text-sm text-slate-900 mb-2 line-clamp-2 group-hover/option:text-rose-600 transition-colors">{cleanMarkdown(note.title)}</h4>
+                                            <div className="text-xs text-slate-500 leading-relaxed max-h-[150px] overflow-hidden relative">{cleanMarkdown(note.content)}<div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-white to-transparent pointer-events-none"></div></div>
                                         </div>
                                     )})}
                                 </div>
@@ -268,7 +283,7 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
     return prev.msg.text === next.msg.text && prev.msg.thought === next.msg.thought && prev.msg.id === next.msg.id && prev.msg.isError === next.msg.isError && prev.msg.isStreaming === next.msg.isStreaming;
 });
 
-export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout }) => {
+const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -306,6 +321,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
 
   const isResizingRef = useRef(false);
 
+  // ... (rest of states)
   const [batchLinkInput, setBatchLinkInput] = useState('');
   const [isBatchExtracting, setIsBatchExtracting] = useState(false);
   const [isMaterialSelectionMode, setIsMaterialSelectionMode] = useState(false);
@@ -342,6 +358,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
 
   useEffect(() => { hasUnsavedChangesRef.current = hasUnsavedChanges; }, [hasUnsavedChanges]);
 
+  // ... (effects)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
@@ -571,6 +588,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
       }
   };
 
+  // ... (effects)
   useEffect(() => {
       if (!batchLinkInput) return;
       const urls = extractXhsUrls(batchLinkInput);
@@ -712,6 +730,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
 
+  // ... (delete handlers)
   const handleBatchDeleteDrafts = (ids: string[]) => {
       const idSet = new Set(ids.map(String));
       setDrafts(prev => prev.filter(d => !idSet.has(String(d.id))));
@@ -843,6 +862,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
       finally { setAnalyzingNoteId(null); setSelectedSocialNote(null); }
   };
 
+  // 🟢 Enhanced adoptNote with safety check
   const adoptNote = useCallback((note: BulkNote) => {
       const proceed = () => {
           const cleanTitle = cleanMarkdown(note.title);
@@ -853,7 +873,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
           setPreviewState(prev => ({ ...prev, title: cleanTitle }));
           
           setActiveItemId(null);
-          setHasUnsavedChanges(true);
+          setHasUnsavedChanges(true); // Mark as dirty
 
           setIsPreviewCollapsed(false);
           if (window.innerWidth < 1024) setActiveTab('preview');
@@ -904,6 +924,7 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
   };
 
   const handleGenerateClick = () => {
+      // If single generation, it will auto-adopt, so we need to warn if unsaved
       if (hasUnsavedChanges && bulkCount === 1) {
           setUnsavedNavModal({ 
               show: true, 
@@ -929,391 +950,591 @@ export const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, on
           const refresh = await projectRepo.aggregateUserAssets(user.id);
           setLibraryData(refresh);
           setEditingPersona(null);
-          showToast("人设已保存");
+          showToast("人设已保存并同步至云端");
       }
   };
 
-  if (showTrainer) {
-      return (
-          <div className="h-screen w-screen bg-white relative z-50">
-              <button onClick={() => setShowTrainer(false)} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full z-50"><X size={24} /></button>
-              <PersonaTrainer 
-                  initialSamples={trainerInitialSamples}
-                  onAnalysisComplete={(p, source) => {
-                      setEditingPersona({...p, sourceNoteId: 'trainer'});
-                      setShowTrainer(false);
-                  }}
-                  onPersonaLocked={() => {}} 
-                  onSaveToLibrary={() => {}} 
-              />
-          </div>
-      );
+  const createNewProject = async (name: string) => {
+      const cleanName = name.trim();
+      if (!cleanName) return;
+      if (isCreatingProject) return;
+      if (projects.some(p => p.name.trim() === cleanName)) { showToast("❌ 项目名称已存在，请使用其他名称", 'error'); return; }
+      setIsCreatingProject(true);
+      const tempId = `temp-${Date.now()}`;
+      const newP: Project = { 
+          id: tempId, name: cleanName, updatedAt: Date.now(), 
+          contextText: '', attachedFiles: [], socialNotes: [], chatHistory: [], 
+          fidelity: FidelityMode.STRICT, wordCountLimit: 400, generatedContent: '', 
+          previewState: { title: '', images: [getRandomCover()] }, drafts: [], publishedHistory: [], isDeleted: false
+      };
+      setProjects(prev => [newP, ...prev]);
+      setCurrentProjectId(tempId);
+      setShowNameModal(false);
+      setTempProjectName('');
+      try {
+          const realId = await projectRepo.saveProject(user.id, newP);
+          if (realId && realId !== tempId) {
+              setProjects(prev => prev.map(p => p.id === tempId ? { ...p, id: realId } : p));
+              setCurrentProjectId(realId);
+          }
+      } catch (e) { 
+          showToast("创建项目时同步云端失败，请检查网络", 'error'); 
+          setProjects(prev => prev.filter(p => p.id !== tempId));
+          setCurrentProjectId(null);
+      } finally { setIsCreatingProject(false); }
+  };
+
+  const getPersonaUsageCount = (tone: string) => {
+      return libraryData.finished.filter(item => {
+          if (!item) return false;
+          if (item.type === 'draft') return (item as NoteDraft).personaName === tone;
+          return false;
+      }).length;
+  };
+
+  if (viewMode === 'dashboard') {
+     // ... (dashboard JSX)
+     return (
+        <div className="h-screen bg-[#F0F2F5] flex flex-col relative font-sans text-slate-800 overflow-hidden">
+             {/* ... */}
+             {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
+             {confirmModal && (
+                 <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
+                     <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full text-center">
+                         <h3 className="font-bold text-lg mb-2">确认操作</h3>
+                         <p className="text-slate-500 mb-6 text-sm">{confirmModal.msg}</p>
+                         <div className="flex gap-3">
+                             <button onClick={() => setConfirmModal(null)} className="flex-1 py-2 border rounded-xl text-sm font-bold text-slate-500 active:scale-95 transition-transform">取消</button>
+                             <button onClick={confirmModal.action} className="flex-1 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform">确认</button>
+                         </div>
+                     </div>
+                 </div>
+             )}
+             <div className="h-16 px-8 flex items-center justify-between bg-white/70 backdrop-blur-md border-b border-white/50 z-50 shadow-sm">
+                 <div className="flex items-center gap-2">
+                     <div className="w-8 h-8 bg-rose-500 rounded-lg flex items-center justify-center text-white shadow-lg shadow-rose-200">
+                         <Command size={18} />
+                     </div>
+                     <h1 className="text-lg font-bold text-slate-800">创作中心</h1>
+                 </div>
+                 <div className="flex items-center gap-4">
+                     <span className="text-xs font-medium text-slate-500">Hi, {user.username}</span>
+                     <button onClick={onLogout} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-rose-600 transition-all active:scale-90" title="退出">
+                         <LogOut size={16} />
+                     </button>
+                 </div>
+            </div>
+            <div className="flex-1 overflow-y-auto no-scrollbar p-8">
+                <div className="max-w-6xl mx-auto">
+                    <div className="mb-10 animate-fade-in">
+                        <h2 className="text-3xl font-bold text-slate-900 mb-2">准备好创作了吗？</h2>
+                        <p className="text-slate-500 font-medium">选择一个项目开始，或开启新的创作旅程。</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-fade-in delay-75">
+                        <div onClick={() => setShowNameModal(true)} className="aspect-[4/3] rounded-3xl border-2 border-dashed border-slate-300 hover:border-rose-400 bg-slate-50 hover:bg-white hover:shadow-xl hover:shadow-rose-100/50 transition-all cursor-pointer flex flex-col items-center justify-center group relative overflow-hidden active:scale-95">
+                             <div className="absolute inset-0 bg-gradient-to-tr from-transparent to-rose-50 opacity-0 group-hover:opacity-100 transition-opacity" />
+                             <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform group-hover:bg-rose-500 group-hover:text-white text-slate-400 z-10">
+                                 {isCreatingProject ? <Loader2 size={28} className="animate-spin"/> : <Plus size={28} />}
+                             </div>
+                             <span className="font-bold text-slate-500 group-hover:text-rose-600 z-10">新建项目</span>
+                        </div>
+                        {projects.map(p => (
+                            <div key={p.id} onClick={() => setCurrentProjectId(p.id)} className="aspect-[4/3] bg-white rounded-3xl p-5 border border-slate-200/60 shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_10px_30px_rgb(0,0,0,0.08)] hover:-translate-y-1 transition-all cursor-pointer flex flex-col justify-between group relative overflow-hidden active:scale-95">
+                                <button onClick={(e) => handleDeleteProject(e, p.id)} className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-sm hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-all z-20 shadow-sm border border-slate-100 active:scale-90"><Trash2 size={14} /></button>
+                                <div className="z-10"><div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 mb-4 group-hover:bg-slate-900 group-hover:text-white transition-colors"><Folder size={18} /></div><h3 className="font-bold text-lg text-slate-800 line-clamp-1 mb-1">{p.name}</h3><p className="text-xs text-slate-400 font-medium">{new Date(p.updatedAt).toLocaleString('zh-CN', { hour12: false })}</p></div>
+                                <div className="flex items-center gap-2 mt-4 z-10"><div className="px-2 py-1 bg-slate-50 rounded-lg text-[10px] font-bold text-slate-500 border border-slate-100 flex items-center gap-1"><FileText size={10} /> {p.drafts?.length || 0}</div><div className="px-2 py-1 bg-slate-50 rounded-lg text-[10px] font-bold text-slate-500 border border-slate-100 flex items-center gap-1"><Hash size={10} /> {p.socialNotes?.length || 0}</div></div>
+                                <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-gradient-to-tl from-slate-100 to-transparent rounded-full opacity-50 group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+            {showNameModal && (
+                <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[100] flex items-center justify-center animate-fade-in p-4">
+                    <div className="bg-white rounded-3xl w-full max-w-sm p-8 shadow-2xl ring-1 ring-white/50">
+                        <h2 className="text-xl font-bold text-slate-900 mb-6 text-center">给新项目起个名字</h2>
+                        <input type="text" value={tempProjectName} onChange={e => setTempProjectName(e.target.value)} placeholder="例如：8月防晒霜种草..." className="w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-200 mb-6 font-bold text-center text-lg outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-300" autoFocus />
+                        <div className="flex gap-3"><button onClick={() => setShowNameModal(false)} className="flex-1 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl font-bold text-sm hover:bg-slate-50 transition-colors active:scale-95">取消</button><button onClick={() => { if(!tempProjectName) return; createNewProject(tempProjectName); }} disabled={isCreatingProject} className="flex-[2] py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-black transition-colors shadow-lg shadow-slate-200 active:scale-95 flex justify-center items-center gap-2">{isCreatingProject && <Loader2 size={16} className="animate-spin"/>} 开始创作</button></div>
+                    </div>
+                </div>
+            )}
+        </div>
+     );
   }
 
   return (
-      <div className="flex h-screen bg-[#F8FAFC] overflow-hidden text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900">
-           {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
+    <div className="flex h-screen w-screen bg-[#F8FAFC] overflow-hidden font-sans text-slate-900">
+      {/* ... (rest of the component) */}
+      {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
+      
+      {confirmModal && (
+         <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
+             <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full text-center">
+                 <h3 className="font-bold text-lg mb-2">确认操作</h3>
+                 <p className="text-slate-500 mb-6 text-sm">{confirmModal.msg}</p>
+                 <div className="flex gap-3">
+                     <button onClick={() => setConfirmModal(null)} className="flex-1 py-2 border rounded-xl text-sm font-bold text-slate-500 active:scale-95 transition-transform">取消</button>
+                     <button onClick={confirmModal.action} className="flex-1 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform">确认</button>
+                 </div>
+             </div>
+         </div>
+      )}
 
-           {unsavedNavModal && (
-               <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-                   <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-fade-in">
-                       <h3 className="text-lg font-bold text-slate-900 mb-2">未保存的更改</h3>
-                       <p className="text-sm text-slate-500 mb-6">您有未保存的创作内容，离开将导致内容丢失。</p>
-                       <div className="flex gap-3">
-                           <button onClick={discardAndNavigate} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50">放弃更改</button>
-                           <button onClick={saveAndNavigate} className="flex-1 py-2.5 rounded-xl bg-slate-900 text-white font-bold text-sm hover:bg-slate-800">保存并离开</button>
-                       </div>
-                   </div>
-               </div>
-           )}
+      {/* Unsaved Navigation Modal */}
+      {unsavedNavModal && (
+          <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+              <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full text-center">
+                  <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4 text-amber-500">
+                      <AlertCircle size={24} />
+                  </div>
+                  <h3 className="font-bold text-lg mb-2 text-slate-900">编辑器内容未保存</h3>
+                  <p className="text-slate-500 mb-6 text-sm">生成新内容或切换笔记将会覆盖当前编辑器的内容，是否保存？</p>
+                  <div className="flex flex-col gap-2.5">
+                      <button onClick={saveAndNavigate} className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform">保存并继续</button>
+                      <div className="flex gap-2">
+                          <button onClick={() => setUnsavedNavModal(null)} className="flex-1 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold active:scale-95 transition-transform">取消</button>
+                          <button onClick={discardAndNavigate} className="flex-1 py-3 bg-red-50 text-red-500 rounded-xl text-sm font-bold active:scale-95 transition-transform">不保存 (覆盖)</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
-           <div className="w-[60px] lg:w-[70px] bg-slate-900 flex flex-col items-center py-6 shrink-0 z-30">
-               <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white mb-8 shadow-lg shadow-indigo-900/50">
-                   <Sparkles size={20} />
-               </div>
-               
-               <div className="flex flex-col gap-4 w-full px-2">
-                   <button onClick={() => setViewMode('dashboard')} className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center transition-all ${viewMode === 'dashboard' ? 'bg-white text-slate-900' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}>
-                       <LayoutGrid size={20} />
-                   </button>
-                   {currentProjectId && (
-                       <button onClick={() => setViewMode('workspace')} className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center transition-all ${viewMode === 'workspace' ? 'bg-white text-slate-900' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}>
-                           <Wand2 size={20} />
-                       </button>
-                   )}
-               </div>
-
-               <div className="mt-auto flex flex-col gap-4">
-                   <button onClick={onLogout} className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-950/30 transition-all"><LogOut size={20}/></button>
-                   <img src={user.avatar || `https://api.dicebear.com/7.x/notionists/svg?seed=${user.username}`} className="w-8 h-8 rounded-full bg-slate-800 border-2 border-slate-700" />
-               </div>
-           </div>
-
-           <div className="flex-1 flex overflow-hidden relative">
-               {viewMode === 'dashboard' ? (
-                   <div className="flex-1 overflow-y-auto p-8 lg:p-12">
-                       <div className="max-w-6xl mx-auto">
-                           <div className="flex justify-between items-end mb-8">
-                               <div>
-                                   <h1 className="text-3xl font-bold text-slate-900 mb-2">创作中心</h1>
-                                   <p className="text-slate-500">管理您的创作项目与人设资产</p>
-                               </div>
-                               <button onClick={() => {
-                                   const newId = `temp-${Date.now()}`;
-                                   const newProject = { 
-                                       id: newId, 
-                                       name: '新项目', 
-                                       updatedAt: Date.now(), 
-                                       contextText: '', 
-                                       attachedFiles: [], 
-                                       socialNotes: [], 
-                                       chatHistory: [], 
-                                       fidelity: FidelityMode.STRICT, 
-                                       wordCountLimit: 300, 
-                                       generatedContent: '', 
-                                       previewState: { title: '', images: [getRandomCover()] }, 
-                                       drafts: [], 
-                                       publishedHistory: [] 
-                                   };
-                                   setProjects([newProject, ...projects]);
-                                   setCurrentProjectId(newId);
-                                   projectRepo.saveProject(user.id, newProject as Project).then(id => {
-                                       if(id) setCurrentProjectId(id);
-                                   });
-                                   setViewMode('workspace');
-                               }} className="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg shadow-slate-200">
-                                   <Plus size={18} /> 新建项目
-                               </button>
-                           </div>
-
-                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                               {projects.map(project => (
-                                   <div key={project.id} onClick={() => { setCurrentProjectId(project.id); setViewMode('workspace'); }} className="group bg-white border border-slate-200 p-6 rounded-2xl hover:border-indigo-500 hover:shadow-xl hover:shadow-indigo-100/50 transition-all cursor-pointer relative overflow-hidden">
-                                       <div className="flex justify-between items-start mb-4">
-                                           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
-                                               <Folder size={24} />
-                                           </div>
-                                           <button onClick={(e) => handleDeleteProject(e, project.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16}/></button>
-                                       </div>
-                                       <h3 className="text-lg font-bold text-slate-900 mb-1 group-hover:text-indigo-600 transition-colors">{project.name}</h3>
-                                       <p className="text-xs text-slate-500 mb-4">更新于 {new Date(project.updatedAt).toLocaleDateString()}</p>
-                                       <div className="flex gap-2">
-                                           <span className="px-2 py-1 bg-slate-50 text-slate-500 text-[10px] rounded-md font-medium border border-slate-100">{project.drafts?.length || 0} 草稿</span>
-                                           <span className="px-2 py-1 bg-emerald-50 text-emerald-600 text-[10px] rounded-md font-medium border border-emerald-100">{project.publishedHistory?.length || 0} 已发布</span>
-                                       </div>
-                                   </div>
-                               ))}
-                               {projects.length === 0 && (
-                                   <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50">
-                                       <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                                           <Database size={24} />
-                                       </div>
-                                       <p className="text-slate-500 font-medium">暂无项目，开始您的创作之旅吧</p>
-                                   </div>
-                               )}
-                           </div>
-                       </div>
-                   </div>
-               ) : (
-                   <div className="flex-1 flex h-full">
-                       <div className="w-[320px] border-r border-slate-200 bg-white flex flex-col shrink-0">
-                           <div className="h-14 border-b border-slate-100 flex items-center px-4 justify-between">
-                               <div className="font-bold text-slate-900 flex items-center gap-2 cursor-pointer hover:bg-slate-50 px-2 py-1 rounded-lg" onClick={() => setShowNameModal(true)}>
-                                   {projects.find(p => p.id === currentProjectId)?.name} <Edit2 size={12} className="text-slate-400"/>
-                               </div>
-                               <SyncStatus status={syncStatus} hasUnsavedChanges={hasUnsavedChanges} />
-                           </div>
-                           
-                           <div className="flex p-2 gap-1 border-b border-slate-50">
-                               {['design', 'assets', 'history'].map(tab => (
-                                   <button key={tab} onClick={() => setActiveLeftTab(tab as any)} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeLeftTab === tab ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>
-                                       {tab === 'design' ? '设计' : tab === 'assets' ? '素材' : '历史'}
-                                   </button>
-                               ))}
-                           </div>
-
-                           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                               {activeLeftTab === 'design' && (
-                                   <div className="space-y-6">
-                                       <div>
-                                           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 block">当前人设</label>
-                                           <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 cursor-pointer hover:border-indigo-500 transition-all group" onClick={() => setShowPersonaSelector(true)}>
-                                               <div className="flex justify-between items-center mb-1">
-                                                   <span className="text-sm font-bold text-slate-900">{projects.find(p => p.id === currentProjectId)?.persona?.tone || '默认风格'}</span>
-                                                   <ChevronRight size={14} className="text-slate-400 group-hover:text-indigo-500"/>
-                                               </div>
-                                               <div className="flex flex-wrap gap-1">
-                                                   {projects.find(p => p.id === currentProjectId)?.persona?.keywords?.slice(0,3).map(k => (
-                                                       <span key={k} className="text-[10px] bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-500">{k}</span>
-                                                   ))}
-                                               </div>
-                                           </div>
-                                           <button onClick={() => setShowTrainer(true)} className="w-full mt-2 py-2 border border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50 transition-all flex items-center justify-center gap-1">
-                                               <BrainCircuit size={12}/> 训练新人设
-                                           </button>
-                                       </div>
-
-                                       <div>
-                                           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 block">项目背景</label>
-                                           <textarea 
-                                               value={contextText} 
-                                               onChange={e => setContextText(e.target.value)} 
-                                               className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs resize-none outline-none focus:border-indigo-500 transition-all"
-                                               placeholder="输入产品介绍、活动信息或核心卖点..."
-                                           />
-                                       </div>
-
-                                       <div>
-                                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 block">生成配置</label>
-                                            <div className="space-y-3">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs text-slate-600">保真度模式</span>
-                                                    <div className="flex bg-slate-100 p-0.5 rounded-lg">
-                                                        <button onClick={() => setFidelity(FidelityMode.STRICT)} className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${fidelity === FidelityMode.STRICT ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}>严谨</button>
-                                                        <button onClick={() => setFidelity(FidelityMode.CREATIVE)} className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${fidelity === FidelityMode.CREATIVE ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400'}`}>创意</button>
+      {/* Sidebar ... */}
+      <div className={`flex-col bg-[#F8FAFC] border-r border-slate-200 z-30 transition-all duration-300 ${activeTab === 'libraries' ? 'flex w-full absolute inset-0 bg-[#F8FAFC]' : 'hidden'} lg:flex lg:w-[320px] lg:static lg:shrink-0`}>
+         {/* ... (sidebar content remains same) */}
+         <div className="h-14 flex items-center px-5 border-b border-slate-200 shrink-0 bg-white">
+             <button onClick={() => handleNavigationAttempt(() => setCurrentProjectId(null))} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors mr-3 active:scale-90"><ArrowLeft size={16} /></button>
+             <span className="font-bold text-sm truncate flex-1 text-slate-800">{projects.find(p => p.id === currentProjectId)?.name}</span>
+         </div>
+         {/* ... (rest of sidebar) */}
+         <div className="flex bg-white border-b border-slate-200 px-2 pt-2">
+             {['design', 'assets', 'history'].map(t => (
+                 <button key={t} onClick={() => setActiveLeftTab(t as any)} className={`flex-1 pb-2 text-[11px] font-bold border-b-2 transition-all active:opacity-70 ${activeLeftTab === t ? 'border-rose-500 text-rose-600' : 'border-transparent text-slate-400'}`}>
+                     {t === 'design' ? '设定' : t === 'assets' ? '库' : '成品'}
+                 </button>
+             ))}
+         </div>
+         <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+             {/* ... (content sections) */}
+             {activeLeftTab === 'design' && (
+                 <>
+                     {/* ... (Design tab sections) ... */}
+                     <section className="space-y-3 relative z-50">
+                         {/* ... */}
+                         <div className="flex justify-between items-center">
+                            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><UserIcon size={12}/> 当前人设</h3>
+                            <button onClick={() => { setTrainerInitialSamples([]); setShowTrainer(true); }} className="text-[10px] text-rose-500 hover:text-rose-600 font-bold flex items-center gap-1 active:scale-95"><BrainCircuit size={10}/> 训练新风格</button>
+                         </div>
+                         <div className="flex gap-2 items-center relative z-50">
+                             <div className="flex-1 bg-gradient-to-br from-white to-slate-50 rounded-xl border border-slate-200 p-4 relative group cursor-pointer hover:border-rose-200 transition-all active:scale-[0.98]" onClick={() => setShowPersonaSelector(!showPersonaSelector)}>
+                                 <div className="flex items-center gap-3 mb-2 pointer-events-none">
+                                     <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-500 flex items-center justify-center shrink-0"><UserIcon size={16} /></div>
+                                     <div className="min-w-0">
+                                         <div className="text-xs font-bold text-slate-800 truncate pr-2">{projects.find(p => p.id === currentProjectId)?.persona?.tone || '默认风格'}</div>
+                                         <div className="text-[10px] text-slate-400 truncate pr-2">{projects.find(p => p.id === currentProjectId)?.persona?.description || '点击切换风格模型'}</div>
+                                     </div>
+                                     <ChevronDown size={14} className="ml-auto text-slate-300" />
+                                 </div>
+                                 {showPersonaSelector && (
+                                     <>
+                                        <div className="fixed inset-0 z-[90] cursor-default" onClick={(e) => { e.stopPropagation(); setShowPersonaSelector(false); }} />
+                                        <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 p-2 max-h-60 overflow-y-auto custom-scrollbar animate-fade-in z-[100]" onClick={e => e.stopPropagation()}>
+                                            {(libraryData.personas.length > 0 ? libraryData.personas : globalPersonas).map((p, i) => (
+                                                <div key={i} onClick={() => { handleApplyPersona(p); }} className="p-2 hover:bg-slate-50 rounded-lg cursor-pointer flex items-center justify-between group/item active:scale-95 z-[100]">
+                                                    <div className="flex-1 min-w-0">
+                                                        <span className="text-xs font-medium text-slate-700 block truncate">{p.tone}</span>
+                                                        {p.description && <span className="text-[10px] text-slate-400 block truncate">{p.description}</span>}
+                                                        {p.tags && <div className="flex gap-1 mt-1">{p.tags.slice(0,2).map(t => <span key={t} className="text-[8px] bg-slate-100 text-slate-500 px-1 rounded">{t}</span>)}</div>}
                                                     </div>
+                                                    <Check size={12} className="text-rose-500 opacity-0 group-hover/item:opacity-100" />
                                                 </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs text-slate-600">目标字数</span>
-                                                    <input type="number" value={wordCountLimit} onChange={e => setWordCountLimit(Number(e.target.value))} className="w-16 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-right outline-none focus:border-indigo-500" />
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs text-slate-600">批量生成</span>
-                                                    <div className="flex items-center gap-2">
-                                                        <button onClick={() => setBulkCount(Math.max(1, bulkCount - 1))} className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200">-</button>
-                                                        <span className="text-xs font-bold w-4 text-center">{bulkCount}</span>
-                                                        <button onClick={() => setBulkCount(Math.min(5, bulkCount + 1))} className="w-5 h-5 bg-slate-100 rounded flex items-center justify-center text-slate-500 hover:bg-slate-200">+</button>
-                                                    </div>
+                                            ))}
+                                        </div>
+                                     </>
+                                 )}
+                             </div>
+                             <button onClick={() => { const curr = projects.find(p => p.id === currentProjectId)?.persona; if(curr) setEditingPersona(curr); }} className="p-3 h-full bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-colors active:scale-95"><Pencil size={16} /></button>
+                         </div>
+                     </section>
+                     {/* ... (rest of sections omitted for brevity but remain identical) ... */}
+                     <section className="space-y-3 z-10 relative">
+                         {/* ... */}
+                         <div className="flex justify-between items-center">
+                            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><FileText size={12}/> 核心背景</h3>
+                            <div className="flex gap-1">
+                                <button onClick={handleAnalyzeMaterials} disabled={attachedFiles.length === 0 || isAnalysingFile} className="text-[10px] bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded-md transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50">
+                                    {isAnalysingFile ? <Loader2 size={10} className="animate-spin"/> : <Wand2 size={10}/>} 深度分析
+                                </button>
+                            </div>
+                         </div>
+                         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 transition-shadow hover:shadow-md focus-within:shadow-md focus-within:border-rose-200 relative">
+                            <textarea value={contextText} onChange={e => setContextText(e.target.value)} placeholder="在此输入产品卖点、活动信息或任何背景资料..." className="w-full h-24 text-xs bg-transparent border-none outline-none resize-none placeholder:text-slate-300 leading-relaxed custom-scrollbar" />
+                            <div className="mt-3 pt-3 border-t border-slate-50 grid grid-cols-3 gap-2">
+                                {attachedFiles.map(f => (
+                                    <div key={f.id} className="relative group aspect-square rounded-lg border border-slate-100 bg-slate-50 overflow-hidden cursor-pointer active:scale-95 transition-transform" title={f.name}>
+                                        {f.type === 'image' ? (
+                                            <div className="w-full h-full relative">
+                                                <img src={f.preview || f.data} className="w-full h-full object-cover"/>
+                                                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-1">
+                                                    <span className="text-[8px] text-white truncate w-full block">{f.name}</span>
                                                 </div>
                                             </div>
-                                       </div>
-                                   </div>
-                               )}
-                               
-                               {activeLeftTab === 'assets' && (
-                                   <div className="space-y-6">
-                                       <div>
-                                          <div className="flex justify-between items-center mb-3">
-                                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">参考文件</label>
-                                              <div className="relative">
-                                                  <input type="file" multiple onChange={handleFileUpload} className="hidden" id="asset-upload" />
-                                                  <label htmlFor="asset-upload" className="p-1.5 bg-slate-100 text-slate-500 rounded-lg cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors"><UploadCloud size={14}/></label>
-                                              </div>
-                                          </div>
-                                          <div className="space-y-2">
-                                              {attachedFiles.map(file => (
-                                                  <div key={file.id} className="group flex items-center gap-3 p-2 bg-slate-50 border border-slate-100 rounded-lg hover:border-indigo-200 transition-all relative">
-                                                      <div className="w-8 h-8 bg-white rounded border border-slate-200 flex items-center justify-center shrink-0">
-                                                          {file.type === 'image' ? <ImageIcon size={14} className="text-indigo-500"/> : <FileIcon size={14} className="text-amber-500"/>}
-                                                      </div>
-                                                      <div className="flex-1 min-w-0">
-                                                          <div className="text-xs font-bold text-slate-700 truncate">{file.name}</div>
-                                                          <div className="text-[10px] text-slate-400">{file.type}</div>
-                                                      </div>
-                                                      <button onClick={(e) => removeFile(e, file.id)} className="absolute right-2 p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-all opacity-0 group-hover:opacity-100"><Trash2 size={12}/></button>
-                                                  </div>
-                                              ))}
-                                              {attachedFiles.length === 0 && <div className="text-center py-6 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl">无文件</div>}
-                                          </div>
-                                          {attachedFiles.length > 0 && (
-                                              <button onClick={handleAnalyzeMaterials} disabled={isAnalysingFile} className="w-full mt-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-indigo-100 transition-all">
-                                                  {isAnalysingFile ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>} 智能分析素材
-                                              </button>
-                                          )}
-                                       </div>
-                                       
-                                       <div>
-                                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 block">小红书链接提取</label>
-                                          <div className="flex gap-2 mb-3">
-                                              <input value={batchLinkInput} onChange={e => setBatchLinkInput(e.target.value)} placeholder="粘贴笔记链接..." className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-rose-500" />
-                                              <button disabled={isBatchExtracting} className="px-3 bg-rose-50 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors">
-                                                  {isBatchExtracting ? <Loader2 size={14} className="animate-spin"/> : <LinkIcon size={14}/>}
-                                              </button>
-                                          </div>
-                                          <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                                              {socialNotes.map(note => (
-                                                  <div key={note.noteId} className="flex gap-2 p-2 bg-slate-50 border border-slate-100 rounded-lg group hover:border-rose-200 relative" onClick={() => handleDirectAnalysis(note)}>
-                                                      <img src={note.images[0]?.url} className="w-10 h-10 object-cover rounded bg-slate-200 shrink-0"/>
-                                                      <div className="min-w-0 flex-1">
-                                                          <div className="text-xs font-bold text-slate-800 truncate leading-tight mb-1">{note.title}</div>
-                                                          <div className="text-[10px] text-slate-400 flex items-center gap-1"><UserIcon size={10}/> {note.user.nickname}</div>
-                                                      </div>
-                                                      <button onClick={(e) => removeSocialNote(e, note.noteId)} className="absolute right-1 top-1 p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={10}/></button>
-                                                  </div>
-                                              ))}
-                                          </div>
-                                       </div>
-                                   </div>
-                               )}
+                                        ) : (
+                                            <div className="w-full h-full flex flex-col items-center justify-center p-2 relative">
+                                                <div className="w-8 h-8 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center mb-1">
+                                                    <FileIcon size={16}/>
+                                                </div>
+                                                <span className="text-[8px] text-slate-500 text-center w-full truncate leading-tight px-1">{f.name}</span>
+                                            </div>
+                                        )}
+                                        <div onClick={(e) => removeFile(e, f.id)} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center backdrop-blur-[1px] z-10">
+                                            <Trash2 size={16} className="text-white drop-shadow-sm hover:scale-110 transition-transform"/>
+                                        </div>
+                                    </div>
+                                ))}
+                                <div onClick={() => fileInputRef.current?.click()} className="aspect-square rounded-lg border-2 border-dashed border-slate-200 hover:border-rose-300 hover:bg-rose-50/50 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-95 group text-slate-300 hover:text-rose-500">
+                                    <Plus size={20} />
+                                    <span className="text-[9px] font-bold mt-1">添加</span>
+                                </div>
+                            </div>
+                            <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUpload} accept="image/*,.pdf,.docx,.ppt,.pptx,.txt,.md" />
+                         </div>
+                         {materialAnalysis && (
+                             <div className="mt-2">
+                                <button onClick={() => setShowAnalysisArea(!showAnalysisArea)} className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 hover:text-indigo-600 transition-colors w-full active:scale-95">
+                                    {showAnalysisArea ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                                    已生成的资料分析 {showAnalysisArea ? '(可编辑)' : '(点击展开)'}
+                                </button>
+                                {showAnalysisArea && (
+                                    <div className="mt-2 bg-indigo-50/50 rounded-xl border border-indigo-100 p-3 animate-fade-in relative group/analysis">
+                                        <textarea value={materialAnalysis} onChange={e => setMaterialAnalysis(e.target.value)} className="w-full h-40 text-xs bg-transparent border-none outline-none resize-none text-slate-700 leading-relaxed custom-scrollbar placeholder:text-indigo-300" placeholder="分析结果..."/>
+                                        <div className="absolute top-2 right-2 opacity-0 group-hover/analysis:opacity-100 transition-opacity flex gap-1">
+                                            <button onClick={() => { setMaterialAnalysis(''); setShowAnalysisArea(false); }} className="p-1 bg-white hover:bg-red-50 text-slate-400 hover:text-red-500 rounded shadow-sm border border-slate-100 active:scale-90" title="清除分析"><Trash2 size={12}/></button>
+                                        </div>
+                                    </div>
+                                )}
+                             </div>
+                         )}
+                     </section>
+                     {/* ... (rest of sidebar) */}
+                     <section className="space-y-3 pt-2 border-t border-slate-100">
+                         {/* ... */}
+                         <div className="flex justify-between items-center">
+                            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><LinkIcon size={12}/> 素材库 ({socialNotes.length})</h3>
+                            <div className="flex gap-1">
+                                {isMaterialSelectionMode && (
+                                    <>
+                                        <button onClick={() => setSelectedMaterialIds(selectedMaterialIds.size === socialNotes.length ? new Set() : new Set(socialNotes.map(n => n.noteId)))} className="text-[10px] text-blue-600 font-bold px-1.5 active:scale-95">{selectedMaterialIds.size === socialNotes.length ? '全不选' : '全选'}</button>
+                                        <button onClick={() => { setIsMaterialSelectionMode(false); setSelectedMaterialIds(new Set()); }} className="text-[10px] text-slate-400 px-1.5 active:scale-95">取消</button>
+                                    </>
+                                )}
+                                {!isMaterialSelectionMode && <button onClick={() => setIsMaterialSelectionMode(true)} className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded-md transition-colors active:scale-95">批量管理</button>}
+                            </div>
+                         </div>
+                         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 relative">
+                             <textarea value={batchLinkInput} onChange={e => setBatchLinkInput(e.target.value)} placeholder="粘贴链接，自动识别提取..." className="w-full h-16 text-xs bg-transparent border-none outline-none resize-none placeholder:text-slate-300 leading-relaxed custom-scrollbar" />
+                             <div className="absolute bottom-2 right-2 text-[10px] text-slate-400">
+                                {isBatchExtracting ? <span className="flex items-center gap-1 text-blue-500"><Loader2 size={10} className="animate-spin"/> 解析中...</span> : '自动检测'}
+                             </div>
+                         </div>
+                         <div className="grid grid-cols-2 gap-1.5 mt-2">
+                            {socialNotes.map(note => (
+                                <div key={note.noteId} className="relative aspect-[3/4] rounded-lg overflow-hidden bg-white shadow-sm cursor-pointer group active:scale-[0.98] transition-transform" onClick={(e) => isMaterialSelectionMode ? toggleMaterialSelection(e, note.noteId) : setSelectedSocialNote(note)}>
+                                    <img src={note.images[0]?.url} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" referrerPolicy="no-referrer" />
+                                    <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
+                                        <div className="text-white text-[10px] font-bold line-clamp-2 leading-tight">{note.title}</div>
+                                    </div>
+                                    {isMaterialSelectionMode && (
+                                        <div className="absolute top-1.5 right-1.5">
+                                            {selectedMaterialIds.has(note.noteId) ? (
+                                                <div className="w-5 h-5 rounded-full bg-[#FF2442] border border-white flex items-center justify-center shadow-sm"><Check size={12} className="text-white" strokeWidth={3}/></div>
+                                            ) : ( <div className="w-5 h-5 rounded-full border-[1.5px] border-white/90 bg-black/10 shadow-sm backdrop-blur-sm"></div> )}
+                                        </div>
+                                    )}
+                                    {!isMaterialSelectionMode && ( <button onClick={(e) => removeSocialNote(e, note.noteId)} className="absolute top-1.5 right-1.5 bg-black/40 hover:bg-red-500/80 text-white/80 hover:text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all backdrop-blur-sm active:scale-90"><Trash2 size={12}/></button> )}
+                                </div>
+                            ))}
+                         </div>
+                         {isMaterialSelectionMode && (
+                             <div className="sticky bottom-0 bg-white border-t border-slate-100 p-2 flex gap-2 animate-fade-in shadow-lg z-20">
+                                 <button onClick={handleBatchDeleteMaterials} disabled={selectedMaterialIds.size === 0} className="flex-1 py-2 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-500 rounded-lg text-xs font-bold transition-colors active:scale-95">删除 ({selectedMaterialIds.size})</button>
+                                 <button onClick={handleBatchPersonaAnalysis} disabled={selectedMaterialIds.size === 0 || isBatchAnalyzing} className="flex-[2] py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-lg shadow-slate-200 active:scale-95">{isBatchAnalyzing ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>} 提取人设</button>
+                             </div>
+                         )}
+                     </section>
+                 </>
+             )}
+             {/* ... */}
+             {activeLeftTab === 'assets' && (
+                 <section className="space-y-6">
+                     <div>
+                         <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5"><UserIcon size={12}/> 所有人设 ({libraryData.personas.length})</h3>
+                         <div className="grid grid-cols-2 gap-2.5">
+                             {libraryData.personas.map((p, i) => (
+                                 <div key={i} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow group relative active:scale-[0.98] flex flex-col h-full">
+                                     <div className="flex justify-between items-start mb-2">
+                                         <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 overflow-hidden shrink-0">{p.avatar ? <img src={p.avatar} className="w-full h-full object-cover"/> : <UserIcon size={16}/>}</div>
+                                         <button onClick={() => setEditingPersona(p)} className="p-1.5 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"><Edit2 size={12}/></button>
+                                     </div>
+                                     <div className="font-bold text-xs text-slate-800 line-clamp-1 mb-1">{p.tone}</div>
+                                     <div className="mt-auto flex items-center justify-between border-t border-slate-50 pt-2">
+                                         <span className="text-[9px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">创作了 {getPersonaUsageCount(p.tone)} 篇</span>
+                                         <button className="text-rose-500 hover:bg-rose-50 p-1 rounded transition-colors active:scale-90" onClick={() => handleApplyPersona(p)} title="应用"><Plus size={14}/></button>
+                                     </div>
+                                 </div>
+                             ))}
+                         </div>
+                     </div>
+                 </section>
+             )}
+             {activeLeftTab === 'history' && (
+                 <section className="space-y-6">
+                      {/* 新建笔记入口 */}
+                      <button onClick={handleCreateNewDraft} className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg border border-emerald-100 flex items-center justify-center gap-1.5 text-xs font-bold transition-all active:scale-95 mb-2 shadow-sm">
+                          <Plus size={14}/> 新建空白草稿
+                      </button>
 
-                               {activeLeftTab === 'history' && (
-                                   <div className="space-y-2">
-                                       {chatHistory.filter(m => m.role === 'model' && m.text).map((msg, i) => (
-                                           <div key={i} className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs text-slate-600 line-clamp-3 hover:border-indigo-200 cursor-pointer" onClick={() => {}}>
-                                               {msg.text}
-                                           </div>
-                                       ))}
-                                       {chatHistory.length === 0 && <div className="text-center py-10 text-slate-400 text-xs">暂无历史记录</div>}
-                                   </div>
-                               )}
-                           </div>
-                       </div>
+                      {/* 草稿箱 */}
+                      <div>
+                          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Archive size={12}/> 草稿箱 ({drafts.length})</h3>
+                          <div className="space-y-2">
+                              {drafts.map(d => {
+                                  const didStr = String(d.id);
+                                  return (
+                                    <div key={didStr} className={`bg-white p-2.5 rounded-lg border transition-colors shadow-sm group relative active:scale-[0.98] cursor-pointer ${String(activeItemId) === didStr ? 'border-emerald-500' : 'border-slate-100 hover:border-emerald-300'}`} onClick={() => handleMobileItemSelect(didStr)}>
+                                        <div className="font-medium text-xs text-slate-700 truncate pr-4">{d.title || '未命名草稿'}</div>
+                                        <div className="text-[9px] text-slate-400 mt-0.5 flex justify-between"><span>{new Date(d.createdAt).toLocaleDateString()}</span><span>{d.personaName}</span></div>
+                                        <button onClick={(e) => { e.stopPropagation(); deleteDraft(d.id); }} className="absolute top-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 active:scale-90"><Trash2 size={12} /></button>
+                                    </div>
+                                  );
+                              })}
+                          </div>
+                      </div>
+                      
+                      {/* 已发布 */}
+                      <div>
+                          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Send size={12}/> 已发布 ({publishedHistory.length})</h3>
+                          <div className="space-y-2">
+                              {publishedHistory.map(p => (
+                                <div key={p.id} onClick={() => handleMobileItemSelect(p.id)} className="group relative bg-white p-2 rounded-xl border border-slate-100 hover:border-rose-200 hover:shadow-md transition-all cursor-pointer flex gap-3 items-center active:scale-[0.98]">
+                                    <div className="w-12 h-16 shrink-0 bg-slate-100 rounded-lg overflow-hidden border border-slate-50 relative group/cover cursor-pointer">
+                                        <img src={p.coverImage || p.imageUrls?.[0]} className="w-full h-full object-cover" />
+                                        <div 
+                                            className="absolute bottom-0 right-0 p-1 bg-black/40 backdrop-blur-sm rounded-tl-lg cursor-pointer hover:bg-rose-500 transition-colors"
+                                            onClick={(e) => { e.stopPropagation(); setQrModalRecord(p); }}
+                                            title="获取发布码"
+                                        >
+                                            <QrCode size={10} className="text-white"/>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex-1 min-w-0 py-1">
+                                        <div className="font-bold text-xs text-slate-800 line-clamp-1 mb-1">{p.title || '未命名'}</div>
+                                        <div className="text-[10px] text-slate-400">{new Date(p.publishedAt).toLocaleDateString()}</div>
+                                    </div>
 
-                       <div className="flex-1 flex flex-col bg-[#F8FAFC] relative">
-                           <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar" style={{ paddingBottom: '100px' }}>
-                               {chatHistory.length === 0 ? (
-                                   <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
-                                       <Bot size={48} className="mb-4 text-slate-300"/>
-                                       <p className="text-sm font-medium">输入指令，开始创作</p>
-                                   </div>
-                               ) : (
-                                   chatHistory.map(msg => (
-                                       <ChatMessageItem key={msg.id} msg={msg} onAdopt={adoptNote} />
-                                   ))
-                               )}
-                               <div ref={chatEndRef}/>
-                           </div>
-                           
-                           <div className="absolute bottom-6 left-6 right-6">
-                               <div className="bg-white p-2 rounded-2xl shadow-xl shadow-indigo-100/50 border border-slate-200 flex flex-col gap-2 relative">
-                                   <textarea 
-                                       ref={textareaRef}
-                                       value={currentInput}
-                                       onChange={e => setCurrentInput(e.target.value)}
-                                       onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerateClick(); } }}
-                                       placeholder="输入创作指令..."
-                                       className="w-full max-h-32 bg-transparent border-none outline-none text-sm p-2 resize-none text-slate-800 placeholder:text-slate-400"
-                                       rows={1}
-                                   />
-                                   <div className="flex justify-between items-center px-2 pb-1">
-                                       <div className="flex gap-2">
-                                           <button className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" onClick={() => fileInputRef.current?.click()}>
-                                               <Paperclip size={16}/>
-                                           </button>
-                                       </div>
-                                       <button disabled={isGenerating} onClick={handleGenerateClick} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-indigo-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed">
-                                           {isGenerating ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} 生成
-                                       </button>
-                                   </div>
-                               </div>
-                           </div>
-                       </div>
-
-                       <div className="w-[375px] bg-slate-100 border-l border-slate-200 flex flex-col shrink-0 p-4 items-center justify-center relative">
-                           <MobilePreview 
-                              content={generatedContent}
-                              onContentChange={setGeneratedContent}
-                              images={previewState.images}
-                              onImagesChange={(imgs) => setPreviewState(prev => ({ ...prev, images: imgs }))}
-                              user={user}
-                              onCopy={() => {}}
-                              onSaveToLibrary={internalSaveToLibrary}
-                              drafts={drafts}
-                              onDeleteDraft={deleteDraft}
-                              onDeleteDraftBatch={handleBatchDeleteDrafts}
-                              publishedHistory={publishedHistory}
-                              onSavePublished={handlePublishSuccess}
-                              onDeletePublished={deletePublishedRecord}
-                              onDeletePublishedBatch={batchDeletePublishedRecords}
-                              onFileUpload={handleMobileFileUpload}
-                              activeItemId={activeItemId}
-                              setActiveItemId={handleMobileItemSelect}
-                              onNewNote={handleCreateNewDraft}
-                           />
-                       </div>
-                   </div>
-               )}
-           </div>
-
-           {showNameModal && (
-               <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-                   <div className="bg-white rounded-xl p-6 w-80 shadow-2xl">
-                       <h3 className="font-bold mb-4">重命名项目</h3>
-                       <input value={tempProjectName} onChange={e => setTempProjectName(e.target.value)} placeholder="项目名称" className="w-full border border-slate-200 rounded-lg px-3 py-2 mb-4 text-sm outline-none focus:border-indigo-500" autoFocus />
-                       <div className="flex gap-2">
-                           <button onClick={() => setShowNameModal(false)} className="flex-1 py-2 text-slate-500 font-bold text-xs bg-slate-100 rounded-lg">取消</button>
-                           <button onClick={() => {
-                               setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, name: tempProjectName || '未命名项目', updatedAt: Date.now() } : p));
-                               setShowNameModal(false);
-                               setTempProjectName('');
-                           }} className="flex-1 py-2 text-white font-bold text-xs bg-indigo-600 rounded-lg">确认</button>
-                       </div>
-                   </div>
-               </div>
-           )}
-           
-           {showPersonaSelector && (
-               <div className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-sm flex items-center justify-center p-6">
-                   <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl animate-fade-in">
-                       <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                           <h3 className="font-bold text-slate-900">选择人设模型</h3>
-                           <button onClick={() => setShowPersonaSelector(false)}><X size={20} className="text-slate-400"/></button>
-                       </div>
-                       <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-4">
-                           <div className="p-4 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-all min-h-[140px]" onClick={() => { setShowPersonaSelector(false); setShowTrainer(true); }}>
-                               <Plus size={24} className="text-indigo-400"/>
-                               <span className="text-sm font-bold text-indigo-500">新建/训练人设</span>
-                           </div>
-                           {globalPersonas.map((p, i) => (
-                               <div key={i} onClick={() => handleApplyPersona(p)} className="p-4 rounded-xl border border-slate-200 cursor-pointer hover:border-indigo-500 hover:shadow-md transition-all group relative">
-                                   <div className="font-bold text-slate-900 mb-2">{p.tone}</div>
-                                   <div className="flex flex-wrap gap-1.5 mb-2">
-                                       {p.keywords.slice(0,4).map(k => <span key={k} className="text-[10px] bg-slate-50 px-1.5 py-0.5 rounded text-slate-500">{k}</span>)}
-                                   </div>
-                                   <div className="text-xs text-slate-400 line-clamp-2">{p.description || "暂无描述"}</div>
-                                   {p.sourceNoteId && <div className="absolute top-3 right-3 text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">{p.sourceNoteId === 'trainer' ? '训练' : '提取'}</div>}
-                               </div>
-                           ))}
-                           <div onClick={() => handleApplyPersona(DEFAULT_MANUAL_PERSONA as PersonaAnalysis)} className="p-4 rounded-xl border border-slate-200 cursor-pointer hover:border-indigo-500 hover:shadow-md transition-all bg-slate-50/50">
-                               <div className="font-bold text-slate-900 mb-2">系统默认</div>
-                               <div className="text-xs text-slate-500">通用的小红书博主风格，亲切自然。</div>
-                           </div>
-                       </div>
-                   </div>
-               </div>
-           )}
+                                    <div className="flex items-center gap-1 pr-1">
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); deletePublishedRecord(p.id); }} 
+                                            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                                            title="删除"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                              ))}
+                          </div>
+                      </div>
+                 </section>
+             )}
+         </div>
       </div>
+      
+      {/* ... (Main Content Area - Chat & Preview - No changes) ... */}
+      <div className={`flex-1 flex flex-col bg-white relative min-w-0 z-20 ${activeTab === 'chat' ? 'flex' : 'hidden'} lg:flex`}>
+          <div className="h-14 border-b border-slate-100 flex items-center justify-between px-6 bg-white sticky top-0 z-10">
+              <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div><span className="text-sm font-bold text-slate-900">AI 创作助手</span></div>
+              <div className="flex items-center gap-4">
+                 {/* 🟢 传入 hasUnsavedChanges 状态 */}
+                 <SyncStatus status={syncStatus} hasUnsavedChanges={hasUnsavedChanges} />
+                 <div className="h-4 w-[1px] bg-slate-200 mx-2"></div>
+                 <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded text-[10px] font-bold text-slate-500"><Zap size={10} fill="currentColor" className="text-yellow-500" />{user.quotaRemaining}</div>
+                 <button onClick={() => setIsPreviewCollapsed(!isPreviewCollapsed)} className="hidden lg:block text-slate-400 hover:text-slate-800 active:scale-95 transition-transform">{isPreviewCollapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}</button>
+              </div>
+          </div>
+          {/* ... (Rest of chat logic remains same) */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 lg:px-16 space-y-10 scroll-smooth pb-40">
+              {chatHistory.length === 0 && <div className="h-full flex flex-col items-center justify-center pb-20 opacity-50"><div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mb-6"><Sparkles size={32} className="text-slate-300" /></div><h3 className="text-sm font-medium text-slate-400">准备好创作爆款了吗？</h3></div>}
+              {chatHistory.map((msg) => ( <ChatMessageItem key={msg.id} msg={msg} onAdopt={adoptNote} /> ))}
+              <div ref={chatEndRef} />
+          </div>
+          <div className="absolute bottom-6 left-0 right-0 flex justify-center px-4">
+              <div className="w-full max-w-2xl bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 p-2 flex flex-col gap-2 transition-all ring-1 ring-slate-100 focus-within:ring-2 focus-within:ring-rose-500/20 focus-within:border-rose-400">
+                  <textarea ref={textareaRef} value={currentInput} onChange={(e) => setCurrentInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleGenerateClick()} placeholder="输入创作指令..." className="w-full max-h-32 bg-transparent border-none outline-none text-sm font-medium px-3 py-2 resize-none placeholder:text-slate-400 text-slate-900" rows={1} />
+                  <div className="flex justify-between items-center px-2 pb-1">
+                      <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-0.5 border border-slate-100">
+                              <button onClick={() => setFidelity(FidelityMode.CREATIVE)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all active:scale-95 ${fidelity === FidelityMode.CREATIVE ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>创意</button>
+                              <button onClick={() => setFidelity(FidelityMode.STRICT)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all active:scale-95 ${fidelity === FidelityMode.STRICT ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>严谨</button>
+                          </div>
+                          <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-2 py-1 border border-slate-100 ml-2">
+                             <span className="text-[10px] font-bold text-slate-400 w-12 text-center">{wordCountLimit}字</span>
+                             <input type="range" min="100" max="2000" step="50" value={wordCountLimit} onChange={(e) => setWordCountLimit(Number(e.target.value))} className="w-24 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"/>
+                          </div>
+                          <div className="flex gap-1 ml-2">
+                             {[1,3,5].map(n => <button key={n} onClick={() => setBulkCount(n)} className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold transition-colors active:scale-90 ${bulkCount === n ? 'bg-slate-900 text-white' : 'text-slate-400 hover:bg-slate-100'}`}>{n}</button>)}
+                          </div>
+                      </div>
+                      <button onClick={handleGenerateClick} disabled={isGenerating || (!currentInput && attachedFiles.length === 0)} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 ${isGenerating ? 'bg-slate-100 text-slate-300' : 'bg-slate-900 text-white hover:bg-black hover:scale-105 shadow-md'}`}>
+                          {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      </div>
+
+      {!isPreviewCollapsed && (
+          <div style={{ width: window.innerWidth >= 1024 ? rightPanelWidth : '100%' }} className={`flex-col bg-[#F8FAFC] z-20 transition-all border-l border-slate-200 relative ${activeTab === 'preview' ? 'flex w-full absolute inset-0' : 'hidden'} lg:flex lg:shrink-0 lg:static`}>
+              {/* ... (MobilePreview container) */}
+              <div className="hidden lg:block absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-rose-500/50 z-50 transition-colors" onMouseDown={() => { isResizingRef.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }}></div>
+              <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 shrink-0 bg-[#F8FAFC]">
+                   <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">效果预览</span>
+                   <button onClick={() => setActiveTab('chat')} className="lg:hidden p-2 text-slate-400 active:scale-90"><X size={18} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-8 flex justify-center items-start">
+                 <MobilePreview 
+                    content={generatedContent} 
+                    onContentChange={(c) => { setGeneratedContent(c); setHasUnsavedChanges(true); }}
+                    onCopy={() => { navigator.clipboard.writeText(generatedContent); showToast("已复制"); }} 
+                    drafts={drafts} 
+                    onDeleteDraft={deleteDraft} 
+                    onDeleteDraftBatch={handleBatchDeleteDrafts}
+                    images={previewState.images}
+                    onImagesChange={(imgs) => { setPreviewState(prev => ({ ...prev, images: imgs })); setHasUnsavedChanges(true); }}
+                    onSaveToLibrary={internalSaveToLibrary} 
+                    publishedHistory={publishedHistory} 
+                    onSavePublished={handlePublishSuccess} 
+                    onDeletePublished={deletePublishedRecord}
+                    onDeletePublishedBatch={batchDeletePublishedRecords} 
+                    onFileUpload={handleMobileFileUpload} 
+                    user={user} 
+                    activeItemId={activeItemId}
+                    setActiveItemId={handleMobileItemSelect}
+                    onNewNote={handleCreateNewDraft}
+                 />
+              </div>
+          </div>
+      )}
+
+      {selectedSocialNote && (
+          // ... (Rest of JSX omitted)
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedSocialNote(null)}>
+               <div className="w-full max-w-5xl h-[85vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setSelectedSocialNote(null)} className="absolute top-4 left-4 p-2 bg-black/50 text-white rounded-full z-50 active:scale-90"><X size={20}/></button>
+                    <div className="w-[60%] bg-black flex items-center justify-center relative group">
+                        <img src={selectedSocialNote.images[currentModalImgIdx]?.url} className="max-h-full max-w-full"/>
+                    </div>
+                    <div className="w-[40%] bg-white p-8 overflow-y-auto">
+                        <h2 className="text-xl font-bold mb-4">{selectedSocialNote.title}</h2>
+                        <p className="text-sm text-slate-600 whitespace-pre-wrap">{selectedSocialNote.desc}</p>
+                        <button onClick={() => handleDirectAnalysis(selectedSocialNote)} disabled={analyzingNoteId === selectedSocialNote.noteId} className={`mt-8 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${ analyzingNoteId === selectedSocialNote.noteId ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-black active:scale-[0.98]' }`}>
+                            {analyzingNoteId === selectedSocialNote.noteId ? ( <> <Loader2 size={18} className="animate-spin" /> 正在深度分析... </> ) : ( <> <Sparkles size={18} /> 提取人设 </> )}
+                        </button>
+                    </div>
+               </div>
+          </div>
+      )}
+
+      {editingPersona && (
+          // ... (Rest of Editing Modal JSX)
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[250] flex items-center justify-center p-6 animate-fade-in" onClick={() => setEditingPersona(null)}>
+              <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-bold text-lg flex items-center gap-2 text-slate-800"><Settings2 size={20}/> 编辑人设</h3>
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">人设名称 (Tone)</label>
+                      <input value={editingPersona.tone} onChange={e => setEditingPersona({...editingPersona, tone: e.target.value})} className="w-full border border-slate-200 p-3 rounded-xl text-sm font-bold text-indigo-900 bg-slate-50 focus:bg-white focus:border-indigo-300 outline-none transition-all"/>
+                  </div>
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">分类 & 标签</label>
+                      <div className="flex flex-col gap-2">
+                          <input value={editingPersona.category || ''} onChange={e => setEditingPersona({...editingPersona, category: e.target.value})} placeholder="分类" className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white outline-none"/>
+                          <div className="flex flex-wrap gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100 min-h-[42px]">
+                              {editingPersona.tags?.map((tag, idx) => ( <span key={idx} className={`text-[10px] font-bold px-2 py-1 rounded-lg border flex items-center gap-1 ${getTagColor(tag)}`}>{tag} <button onClick={() => setEditingPersona({...editingPersona, tags: editingPersona.tags?.filter((_, i) => i !== idx)})} className="opacity-50 hover:opacity-100 ml-1">×</button> </span> ))}
+                              <input placeholder="+ 标签" onKeyDown={(e) => { if (e.key === 'Enter') { const val = e.currentTarget.value.trim(); if (val) { setEditingPersona({...editingPersona, tags: [...(editingPersona.tags || []), val]}); e.currentTarget.value = ''; } } }} className="text-xs bg-transparent outline-none flex-1 min-w-[60px]"/>
+                          </div>
+                      </div>
+                  </div>
+                  <div>
+                      <label className="text-xs font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">系统指令 (System Prompt)</label>
+                      <textarea value={editingPersona.writerPersonaPrompt} onChange={e => setEditingPersona({...editingPersona, writerPersonaPrompt: e.target.value})} className="w-full h-40 border border-slate-200 p-3 rounded-xl text-[11px] font-mono leading-relaxed resize-none bg-slate-900 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500/30 custom-scrollbar"/>
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                      <button onClick={() => setEditingPersona(null)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors active:scale-95">取消</button>
+                      <button onClick={handleSaveEditedPersona} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 active:scale-95"><CheckCircle2 size={16}/> 保存并应用</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* 🟢 新增：侧边栏点击后弹出的二维码查看Modal - 核心修复点 */}
+      {qrModalRecord && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in" onClick={() => setQrModalRecord(null)}>
+              <div className="relative w-full max-w-[320px] rounded-[24px] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                  {/* (Modal content matches original) */}
+                  <div className="relative aspect-[3/4] w-full">
+                       {/* Full Cover Background */}
+                       <img src={qrModalRecord.coverImage || qrModalRecord.imageUrls?.[0]} className="absolute inset-0 w-full h-full object-cover" />
+                       
+                       {/* Overlay Gradient */}
+                       <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
+
+                       {/* Bottom Floating White Card */}
+                       <div className="absolute bottom-4 left-4 right-4 bg-white rounded-[16px] p-4 flex justify-between items-end shadow-lg">
+                          <div className="flex-1 mr-4 min-w-0">
+                              <h3 className="text-[16px] font-bold text-slate-900 mb-3 line-clamp-2 leading-snug">{qrModalRecord.title || '笔记分享'}</h3>
+                              <div className="flex items-center gap-2"><span className="text-[#ff2442] font-bold text-xs">小红书 App</span></div>
+                              <div className="text-[10px] text-slate-400 mt-1 scale-95 origin-left">长按扫码查看笔记</div>
+                          </div>
+                          <div className="w-16 h-16 shrink-0 bg-slate-50 border border-slate-100 rounded-lg p-1 flex items-center justify-center">
+                              {qrModalRecord.qrCodeUrl ? <img src={qrModalRecord.qrCodeUrl} className="w-full h-full object-contain mix-blend-multiply" /> : <QrCode size={24} className="text-slate-300"/>}
+                          </div>
+                       </div>
+                  </div>
+                  <div className="bg-transparent mt-4 flex flex-col gap-3">
+                      <button onClick={() => downloadQrImage(qrModalRecord.qrCodeUrl || '', `xhs-card-${qrModalRecord.title || 'share'}.png`)} className="w-full py-3.5 bg-[#ff2442] hover:bg-[#e01d3a] text-white rounded-full font-bold text-sm shadow-lg shadow-rose-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"><DownloadCloud size={18}/> 保存到相册</button>
+                      <button onClick={() => setQrModalRecord(null)} className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-full font-bold text-sm backdrop-blur-md border border-white/20 active:scale-95 transition-all">关闭</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showTrainer && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4 animate-fade-in">
+             <div className="bg-white w-full h-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden relative flex flex-col">
+                 <button onClick={() => setShowTrainer(false)} className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full z-50 transition-colors"><X size={20}/></button>
+                 <PersonaTrainer 
+                    initialSamples={trainerInitialSamples} 
+                    onPersonaLocked={() => {}} 
+                    onSaveToLibrary={() => {}}
+                    onAnalysisComplete={(p, source) => {
+                        setEditingPersona({
+                             ...p,
+                             category: 'AI训练',
+                             tags: ['AI提取'],
+                             sourceNoteId: 'trainer',
+                             avatar: user.avatar,
+                             description: '通过风格实验室提取'
+                        });
+                        setShowTrainer(false);
+                    }}
+                 />
+             </div>
+        </div>
+      )}
+    </div>
   );
 };
 
-export default Workstation;
+export default memo(Workstation);
