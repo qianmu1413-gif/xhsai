@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole } from '../types';
 import AdminPanel from './AdminPanel';
@@ -74,19 +73,15 @@ const App: React.FC = () => {
     setError('');
     setIsLoading(true);
 
-    // 强制去除空格
-    const cleanUsername = authInput.username.trim();
-    const cleanCode = authInput.code.trim();
-
     try {
-        const { user: foundUser, error: loginError } = await userRepo.login(cleanUsername, cleanCode);
+        const { user: foundUser, error: loginError } = await userRepo.login(authInput.username, authInput.code);
         
         if (foundUser) {
             setUser(foundUser);
             localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(foundUser));
             
             if (rememberMe) {
-                localStorage.setItem(STORAGE_KEY_REMEMBER_ME, JSON.stringify({ username: cleanUsername, code: cleanCode }));
+                localStorage.setItem(STORAGE_KEY_REMEMBER_ME, JSON.stringify(authInput));
             } else {
                 localStorage.removeItem(STORAGE_KEY_REMEMBER_ME);
             }

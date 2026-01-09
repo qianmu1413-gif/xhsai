@@ -600,7 +600,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                     {/* Content Body */}
                     <div className="px-4 py-4 space-y-2 min-h-[400px]">
                         <div className="relative mb-2">
-                            {/* 🟢 优化：Textarea 标题 */}
+                            {/* 🟢 优化：使用 Textarea 实现标题自动换行，不再截断 */}
                             <textarea
                                 ref={titleTextareaRef}
                                 value={title}
@@ -611,6 +611,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                     }
                                 }}
                                 onChange={(e) => {
+                                    // 模拟单行输入习惯，回车即换行到正文
                                     const newTitle = e.target.value.replace(/\n/g, ' '); 
                                     onContentChange(`${newTitle}\n${fullBody}`);
                                 }}
@@ -618,10 +619,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                 placeholder="填写标题会有更多赞哦~"
                                 rows={1}
                             />
-                            {/* 🟢 升级：更明显的胶囊式字数统计 - 优化位置和样式 */}
-                            <div className={`absolute right-1 top-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm backdrop-blur-md transition-all z-10 ${titleCount > 20 ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-slate-100/80 text-slate-500 border border-slate-200'}`}>
-                                {titleCount}/20
-                            </div>
+                            <div className={`absolute right-0 top-1.5 text-[10px] font-mono ${titleCount > 20 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{titleCount}/20</div>
                         </div>
                         <div className="relative">
                             <textarea 
@@ -631,10 +629,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                 className="w-full text-[14px] leading-relaxed text-[#333] border-none outline-none resize-none bg-transparent placeholder:text-slate-300 min-h-[400px]" 
                                 placeholder="添加正文" 
                             />
-                            {/* 🟢 升级：正文字数统计 - 优化位置和样式 */}
-                            <div className={`absolute bottom-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-bold shadow-sm backdrop-blur-md border transition-all z-10 ${bodyCount > 1000 ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-100/80 text-slate-500 border-slate-200'}`}>
-                                {bodyCount}/1000
-                            </div>
+                            <div className={`text-right text-[10px] font-mono mt-1 ${bodyCount > 1000 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{bodyCount}/1000</div>
                         </div>
                         <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-50">
                             <button className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 rounded-full text-[12px] text-slate-600 font-medium active:scale-95 transition-transform"><Plus size={12}/> 话题</button>

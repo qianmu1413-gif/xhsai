@@ -5,210 +5,23 @@ import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// ==========================================
-// 🛠️ Custom Proxy Client (Robust Gateway Support)
-// ==========================================
-class ProxyClient {
-    private apiKey: string;
-    private baseUrl: string;
+// 协议分隔符
+const DATA_MARKER = "###MATRIX_DATA_START###";
 
-    constructor(apiKey: string, baseUrl: string) {
-        this.apiKey = apiKey;
-        // Ensure valid base URL format (remove trailing slash)
-        this.baseUrl = baseUrl.replace(/\/$/, '');
-    }
-
-    get models() {
-        return {
-            generateContent: async (args: any) => this.generateContent(args),
-            generateContentStream: async (args: any) => this.generateContentStream(args)
-        };
-    }
-
-    private normalizeContents(contents: any) {
-        // SDK accepts various formats, REST expects Content[]
-        // If it's a simple string or object, wrap it in an array
-        return Array.isArray(contents) ? contents : [contents];
-    }
-
-    // 🟢 核心修复：格式化 System Instruction
-    // 中转网关通常要求严格的 { parts: [{ text: "" }] } 结构，不支持纯字符串
-    private formatSystemInstruction(instruction: any) {
-        if (!instruction) return undefined;
-        
-        // 如果已经是纯字符串，封装成对象
-        if (typeof instruction === 'string') {
-            return { parts: [{ text: instruction }] };
-        }
-        
-        // 如果已经是对象但没有 parts (兼容性处理)，尝试修复
-        if (typeof instruction === 'object' && !instruction.parts && !instruction.role) {
-             return { parts: [{ text: JSON.stringify(instruction) }] };
-        }
-
-        return instruction;
-    }
-
-    private async generateContent(args: any) {
-        const { model, contents, config } = args;
-        const url = `${this.baseUrl}/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
-        
-        // 分离 systemInstruction 和其他配置
-        const { systemInstruction, ...genConfig } = config || {};
-
-        const payload = {
-            contents: this.normalizeContents(contents),
-            generationConfig: genConfig,
-            systemInstruction: this.formatSystemInstruction(systemInstruction)
-        };
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                // Add header auth support for gateways that strip query params
-                'x-goog-api-key': this.apiKey 
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Proxy Error (${response.status}): ${errText}`);
-        }
-
-        const data = await response.json();
-        
-        // Add SDK-like .text getter
-        return {
-            ...data,
-            get text() {
-                return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            }
-        };
-    }
-
-    private async *generateContentStream(args: any) {
-        const { model, contents, config } = args;
-        // Use SSE (Server-Sent Events) for reliable streaming across proxies
-        const url = `${this.baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
-        
-        // 分离 systemInstruction 和其他配置
-        const { systemInstruction, ...genConfig } = config || {};
-
-        const payload = {
-            contents: this.normalizeContents(contents),
-            generationConfig: genConfig,
-            systemInstruction: this.formatSystemInstruction(systemInstruction)
-        };
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                // Add header auth support for gateways that strip query params
-                'x-goog-api-key': this.apiKey 
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-             const errText = await response.text();
-             throw new Error(`Proxy Stream Error (${response.status}): ${errText}`);
-        }
-
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        if (!reader) return;
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-            
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || ''; 
-            
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const jsonStr = line.slice(6).trim();
-                    if (jsonStr === '[DONE]') return;
-                    try {
-                        const data = JSON.parse(jsonStr);
-                        yield {
-                            ...data,
-                            get text() { return data.candidates?.[0]?.content?.parts?.[0]?.text || ""; }
-                        };
-                    } catch (e) {
-                        // Ignore parse errors for partial chunks
-                    }
-                }
-            }
-        }
-    }
-}
-
-// --- Text Cleaning Utilities ---
+// --- 文本清洗工具 (缓冲区清洗) ---
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
     let cleaned = text;
 
-    // 🔥 1. 移除思维链标签
     cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
     cleaned = cleaned.replace(/\[\[THOUGHT\]\][\s\S]*?\[\[\/THOUGHT\]\]/gi, "");
-    cleaned = cleaned.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
+    cleaned = cleaned.replace(/^(Here is (the|a)|Sure, here is|Okay, here is|Based on the content).*?:/gmi, "");
     
-    // 🔥 2. 靶向移除特定的英文旁白模式
-    const narrativeRegex = /^(My current task|I am|I'm|I have|I've|Refining|Developing|Creating|Now,|My goal|This post|The content|Based on)[\s\S]*?(\n|$)/gim;
-    cleaned = cleaned.replace(narrativeRegex, "");
-    
-    // 🔥 3. 【中文锚点截断法】 - 终极过滤方案
-    // 逻辑：寻找第一个中文字符。如果前面有大段英文，直接切除。
-    const lines = cleaned.split('\n');
-    const filteredLines = [];
-    let contentStarted = false;
-    
-    // 检测中文的正则
-    const hasChinese = /[\u4e00-\u9fa5]/;
-    // 检测 Emoji 的正则
-    const hasEmoji = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
-    
-    for (const line of lines) {
-         const trimmed = line.trim();
-         if (!trimmed) continue;
-
-         if (!contentStarted) {
-             // 如果这一行包含中文，标记正文开始
-             if (hasChinese.test(trimmed)) {
-                 contentStarted = true;
-                 filteredLines.push(line);
-             } 
-             // 如果是 Emoji 开头且没有大量英文（防止 "Analyzing 🧐..." 这种），也标记开始
-             else if (hasEmoji.test(trimmed) && !/[a-zA-Z]{5,}/.test(trimmed)) {
-                  contentStarted = true;
-                  filteredLines.push(line);
-             }
-             // 否则，这行就是英文废话，丢弃
-         } else {
-             // 正文已经开始，保留后续所有内容
-             filteredLines.push(line);
-         }
-    }
-    
-    if (filteredLines.length > 0) {
-        cleaned = filteredLines.join('\n');
-    }
-
-    // 最后的清理
-    cleaned = cleaned.replace(/^#+\s*(Analysis|Thinking Process|Plan|Strategy).*$/gmi, "");
     cleaned = cleaned.replace(/\*\*Persona\*\*:/gi, "**人设定位**:");
     cleaned = cleaned.replace(/\*\*Topic\*\*:/gi, "**主题分析**:");
     cleaned = cleaned.replace(/\*\*Target Audience\*\*:/gi, "**目标人群**:");
-    
+    cleaned = cleaned.replace(/\*\*Key Data\*\*:/gi, "**核心数据**:");
+
     return cleaned.trim();
 };
 
@@ -227,47 +40,95 @@ const extractAndParseJSON = (text: string): any => {
     return json;
 };
 
-// --- File Handling Helpers ---
+// --- 文件处理辅助 ---
+
+// 🛡️ Safe ArrayBuffer extraction (Compatible with old browsers & non-standard Blobs)
 const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
     return new Promise((resolve, reject) => {
-        if (!(blob instanceof Blob)) return reject(new Error("Input is not a Blob"));
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
-        reader.readAsArrayBuffer(blob);
+        if (!(blob instanceof Blob)) {
+            return reject(new Error("Input is not a Blob"));
+        }
+        // Prefer standard method if available and robust
+        if (typeof blob.arrayBuffer === 'function') {
+            blob.arrayBuffer().then(resolve).catch(() => {
+                // Fallback to FileReader if arrayBuffer() fails (e.g. some polyfills)
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as ArrayBuffer);
+                reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
+                reader.readAsArrayBuffer(blob);
+            });
+        } else {
+            // Fallback for older environments
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
+            reader.readAsArrayBuffer(blob);
+        }
     });
 };
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
-        if (!blob || !(blob instanceof Blob)) return reject(new Error("File blob is empty or invalid type"));
+        // 安全检查
+        if (!blob || !(blob instanceof Blob)) {
+             return reject(new Error("File blob is empty or invalid type"));
+        }
         const reader = new FileReader();
         reader.onload = () => {
              const result = reader.result as string;
+             // 兼容不同浏览器返回格式，确保只取 base64 部分
              const base64 = result.includes(',') ? result.split(',')[1] : result;
              resolve(base64);
         };
         reader.onerror = (e) => reject(new Error(`FileReader Failed: ${reader.error?.message}`));
-        reader.readAsDataURL(blob);
+        try {
+            reader.readAsDataURL(blob);
+        } catch (e: any) {
+            reject(new Error(`readAsDataURL Exec Failed: ${e.message}`));
+        }
     });
 };
 
 const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
+    // 🛡️ 核心修复：添加时间戳，强制浏览器忽略缓存，解决“刷新后CORS报错”的问题
     const cleanUrl = url.split('?')[0]; 
     const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
+
+    // 1. 尝试直连 (带时间戳)
     try {
-        const response = await fetch(timestampUrl, { cache: 'no-store', mode: 'cors', credentials: 'omit' }); 
+        const response = await fetch(timestampUrl, { 
+            cache: 'no-store', 
+            mode: 'cors',
+            credentials: 'omit'  // 不发送 Cookie，防止身份验证导致的 CORS 失败
+        }); 
         if (response.ok) return await response.blob();
         if (response.status === 403) throw new Error("403 Forbidden");
     } catch (e: any) { 
-        if (e.message.includes('403')) throw new Error("403 权限拒绝: 请检查腾讯云 COS 防盗链设置");
+        if (e.message.includes('403')) {
+            throw new Error("403 权限拒绝: 请检查腾讯云 COS 的【防盗链】是否设置了允许空 Referer");
+        }
     }
+
+    // 2. 尝试代理 1 (corsproxy.io) - 专门解决 CORS 问题
     try {
+        // 代理也加上原始 URL，不加时间戳防止破坏签名(如果是私有桶)
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
         const res = await fetch(proxyUrl);
         if (res.ok) return await res.blob();
-    } catch (e) {}
-    throw new Error("无法从云端下载文件 (CORS/网络拦截)");
+    } catch (e) {
+        // console.warn("Proxy 1 failed...", e);
+    }
+
+    // 3. 尝试代理 2 (allorigins.win) - 备用线路
+    try {
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        if (res.ok) return await res.blob();
+    } catch (e) {
+        // console.warn("Proxy 2 failed...", e);
+    }
+
+    throw new Error("无法从云端下载文件 (可能原因: 防盗链拦截、CORS配置未生效或浏览器缓存锁死)");
 };
 
 const extractDocxText = async (blob: Blob): Promise<string> => {
@@ -281,6 +142,7 @@ const extractDocxText = async (blob: Blob): Promise<string> => {
     return "[解析器未就绪]";
 };
 
+// 🟢 PDF 解析工具 (依赖 index.html 中的 pdf.js)
 const extractPdfText = async (blob: Blob): Promise<string> => {
     try {
         // @ts-ignore
@@ -293,8 +155,10 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
                 cMapPacked: true,
             });
             const pdf = await loadingTask.promise;
+            
             let fullText = "";
-            const maxPages = Math.min(pdf.numPages, 15); 
+            const maxPages = Math.min(pdf.numPages, 15); // 限制页数防止过载
+            
             for (let i = 1; i <= maxPages; i++) {
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
@@ -303,7 +167,9 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
             }
             return fullText;
         }
-    } catch (e) { console.error("PDF Parse Error", e); }
+    } catch (e) {
+        console.error("PDF Parse Error", e);
+    }
     return "";
 };
 
@@ -311,16 +177,32 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     try {
         let mimeType = file.mimeType || 'text/plain';
         let base64Data = "";
+        
+        // 🛡️ 核心修复: JSON序列化后的 file 对象会变成空对象 {}，必须通过 instanceof Blob 过滤
         let blob: Blob | undefined = (file.file instanceof Blob) ? file.file : undefined;
 
-        if (blob) { mimeType = blob.type || mimeType; } 
+        // 1. 如果有有效的 File/Blob 对象 (刚上传，内存中)，直接使用
+        if (blob) {
+            mimeType = blob.type || mimeType;
+        } 
+        // 2. 如果只有 URL (页面刷新后，或者 file 对象无效)，尝试下载 Blob
         else if (file.data.startsWith('http')) {
-            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } 
-            catch (fetchErr: any) { return { text: `[系统警告: 附件 "${file.name}" 读取失败。]` }; }
+            try {
+                blob = await fetchUrlAsBlob(file.data);
+                mimeType = blob.type || mimeType; // 更新真实的 MIME
+            } catch (fetchErr: any) {
+                console.warn(`Remote fetch failed for ${file.name}:`, fetchErr);
+                // 🟢 智能降级：返回给 AI 一个明确的 System Prompt
+                return { 
+                    text: `[系统警告: 附件 "${file.name}" 读取失败。\n错误原因: ${fetchErr.message}。\n请告知用户："抱歉，我无法读取历史文件 ${file.name}。通常是因为云存储连接超时，请尝试**删除该附件并重新上传**。"]` 
+                };
+            }
         }
+        // 3. 如果是 Base64 (旧数据)
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
             base64Data = parts[1];
+            // 尝试恢复 blob 用于 PDF 解析
              if (file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
                  try {
                     const binaryStr = atob(base64Data);
@@ -333,96 +215,115 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
 
         if (!blob && !base64Data) return { text: `[读取失败: ${file.name}]` };
 
+        // 🟢 PDF 智能处理
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
             if (blob) {
                 const pdfText = await extractPdfText(blob);
-                if (pdfText && pdfText.trim().length > 20) return { text: `[PDF文档内容 ${file.name}]:\n${pdfText}` };
+                if (pdfText && pdfText.trim().length > 20) {
+                     return { text: `[PDF文档内容 ${file.name}]:\n${pdfText}` };
+                }
             }
+            // 降级：如果解析不出文本，尝试发图片 (Base64)
             if (base64Data) return { inlineData: { mimeType: 'application/pdf', data: base64Data } };
             if (blob) return { inlineData: { mimeType: 'application/pdf', data: await blobToBase64(blob) } };
         } 
+        
+        // 图片
         else if (mimeType.startsWith('image/')) {
             if (base64Data) return { inlineData: { mimeType, data: base64Data } };
             if (blob) return { inlineData: { mimeType, data: await blobToBase64(blob) } };
         } 
+        
+        // DOCX
         else if (file.name.endsWith('.docx') && blob) {
             return { text: `[文档内容 ${file.name}]:\n${await extractDocxText(blob)}` };
         } 
+        
+        // 纯文本
         else if (blob) {
+            // text() also needs to be handled if blob is not standard, but assuming blobToBase64 check passed
             return { text: `[文档内容 ${file.name}]:\n${await blob.text()}` };
         }
+        
         return { text: `[未知文件类型: ${file.name}]` };
-    } catch (e: any) { return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; }
+
+    } catch (e: any) { 
+        console.error(`File processing error for ${file.name}:`, e);
+        return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; 
+    }
 };
 
-// 🟢 Smart Client Factory
-// Switches between official SDK and ProxyClient based on configuration
+// 🟢 动态获取 Client，支持从数据库读取 Key 和 BaseURL (代理)
 const getAIClient = async () => {
+    // 从 Supabase 配置中读取，如果没配则使用默认值
     const config = await configRepo.getSystemConfig();
-    const apiKey = config.gemini.apiKey;
-    let baseUrl = config.gemini.baseUrl;
-
-    if (!apiKey) throw new Error("❌ 未配置 API Key");
-
-    const useProxy = baseUrl && baseUrl.trim() !== "" && !baseUrl.includes("googleapis.com");
     
-    if (useProxy && baseUrl) {
-        console.log(`[Matrix System] Using Custom Gateway: ${baseUrl}`);
-        return {
-            client: new ProxyClient(apiKey, baseUrl), // Use custom implementation
-            modelName: config.gemini.model
-        };
+    // 优先使用 Config 中的 Key，没有则尝试环境变量
+    const apiKey = config.gemini.apiKey || process.env.API_KEY;
+    
+    // ⚠️ 关键：必须使用 BaseURL (代理地址) 来解决国内 Failed to fetch 问题
+    const baseUrl = config.gemini.baseUrl;
+
+    if (!apiKey) {
+        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key，或检查环境变量。");
     }
 
-    console.log(`[Matrix System] Using Google Official SDK`);
-    return {
-        client: new GoogleGenAI({ apiKey: apiKey }), // Use official SDK
-        modelName: config.gemini.model
-    };
+    return new GoogleGenAI({ 
+        apiKey: apiKey,
+        baseUrl: baseUrl // 注入代理地址 (e.g. https://api.vectorengine.ai)
+    });
 };
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件可分析";
     try {
-        const { client, modelName } = await getAIClient();
+        const ai = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
-        // 🔥 强化中文输出指令 - 强制翻译模式
-        const prompt = `Task: Analyze the provided materials.
-Output Language: Simplified Chinese (简体中文).
-
-CRITICAL INSTRUCTION: 
-Even if the source material is in English, you MUST translate your analysis into Simplified Chinese.
-Do NOT output any English text in the final response.
-Start the response immediately with the analysis in Chinese.`;
-
-        const response = await client.models.generateContent({
-            model: modelName, 
+        const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
             contents: { parts: [{ text: prompt }, ...fileParts] },
             config: { temperature: 0.2 }
         });
         return cleanText(response.text || "分析失败");
-    } catch (e: any) { return `分析过程发生错误: ${e.message}`; }
+    } catch (e: any) {
+        return `分析过程发生错误: ${e.message || '未知错误'}`;
+    }
 };
 
+// 解析批量生成的笔记
 const parseBulkNotes = (text: string): BulkNote[] => {
     const notes: BulkNote[] = [];
+    // 匹配 "### 方案N" 或 "### 笔记N" 这样的分隔符
     const parts = text.split(/###\s*(?:方案|笔记|Version)\s*\d+/i);
+    
+    // 忽略第一个空部分（如果文本以分隔符开头）
     for (let i = 1; i < parts.length; i++) {
         const part = parts[i].trim();
         if (!part) continue;
+
+        // 尝试提取标题和正文
+        // 格式通常是 "标题：xxx \n 正文：xxx"
         let title = "";
         let content = "";
+
         const titleMatch = part.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
         if (titleMatch) {
             title = titleMatch[1].trim();
+            // 剩下的部分，去掉标题行就是正文
             content = part.replace(titleMatch[0], "").trim();
+            // 去掉可能的 "正文：" 前缀
             content = content.replace(/^(?:正文|Content)[:：]\s*/i, "").trim();
         } else {
+            // 如果没有明确的标题标签，取第一行做标题
             const lines = part.split('\n');
             title = lines[0].trim();
             content = lines.slice(1).join('\n').trim();
         }
-        if (title || content) notes.push({ title, content });
+
+        if (title || content) {
+            notes.push({ title, content });
+        }
     }
     return notes;
 };
@@ -436,57 +337,62 @@ export const streamExpertGeneration = async (
     wordLimit: number,
     onToken: (text: string, thought: string) => void
 ) => {
-    const wordCountConstraint = `生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。`;
     
-    // 🔥 核弹级 System Instruction：定义为 API，开启静默模式，禁止旁白
-    const strictSystemPrompt = `Role: Professional Chinese Copywriting Engine for Xiaohongshu (RedNote).
-Task: Generate high-quality social media content based on the user's input.
+    // 极致的字数硬约束
+    const wordCountConstraint = `
+🚨 **字数硬性指标 (非常重要)**:
+生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。
+- 如果目标是短篇，请务必精炼，直击痛点。
+- 如果目标是长篇，请丰富细节，增强沉浸感。
+- **严禁超出或大幅少于设定字数，请以此字数为基准进行排版。**
+`;
 
-⚠️ FATAL RULES (SILENT MODE ON):
-1. **LANGUAGE**: Output MUST be in **Simplified Chinese (简体中文)** ONLY.
-2. **NO NARRATION**: Absolutely NO "I am writing...", "My current task...", "Refining...". You are NOT a chatbot.
-3. **NO ANALYSIS**: Do NOT output your thinking process or draft plan.
-4. **FORMAT**: Start strictly with the **Title** (containing Emojis).
-5. **ACTION**: Just output the final result directly.
-
+    const chineseStrictRules = `
+🚨 **内容创作铁律**:
+1. 语言：必须全中文。
+2. 标题：吸睛且控制在 20 字以内。
+3. 结构：符合小红书分段习惯，每段配有 Emoji。
 ${wordCountConstraint}
 `;
-    
-    let systemText = strictSystemPrompt;
 
+    const commonRules = `🚨 **核心规范**: 1. 严禁输出 <thinking> 标签。2. 语气符合小红书博主身份。${chineseStrictRules}`;
+    
+    let systemText = "";
     if (fidelity === FidelityMode.STRICT) {
-        systemText += `\n【风格】: 严谨、专业、干货满满。`;
+        systemText = `【角色】：你是一个专业、严谨的内容重构专家。你的任务是基于提供的素材撰写笔记，而不是自由创作。\n${commonRules}\n🚨 **严谨模式规则 (Strict Mode)**:\n1. **绝对忠实于素材**：你只能使用用户提供的【背景】、【文档内容】和【图片】中的信息。\n2. **严禁虚构 (No Hallucination)**：严禁编造素材中未提及的数据、故事、参数或细节。如果素材信息不足，请侧重于强化已有信息的表达，而不要捏造新信息。\n3. 语气权威，逻辑严密，不使用过于浮夸的形容词。`;
     } else {
-        systemText += `\n【风格】: 活泼、网感强、像闺蜜聊天。`;
+        systemText = `【角色】：你是一个亲切、真实的个人号小红书博主。\n${commonRules}\n1. 语气口语化、亲和力强。2. 可以适当发挥想象力补充生活化细节，强调个人感受。`;
     }
 
-    if (personaPrompt) systemText += `\n\n【人设指令 (Apply in Chinese)】:\n${personaPrompt}`;
+    if (personaPrompt) {
+        systemText += `\n\n【风格指令】:\n${personaPrompt}`;
+    }
 
+    // 🟢 批量生成的核心指令注入
     if (count > 1) {
-        systemText += `\n\n【批量生成模式】: 请生成 ${count} 个不同版本。格式如下:\n### 方案1\n标题：...\n正文：...\n### 方案2...`;
+        systemText += `\n\n🚨 **批量生成指令**:\n请务必生成 **${count}** 篇完全不同的笔记方案。
+请严格按照以下格式输出，以便系统解析：
+### 方案1
+标题：(方案1的标题)
+正文：(方案1的内容)
+
+### 方案2
+标题：(方案2的标题)
+正文：(方案2的内容)
+
+...以此类推。不要包含其他开场白或结束语。`;
     }
 
     try {
-        const { client, modelName } = await getAIClient();
+        const ai = await getAIClient(); // Await 初始化
         const fileParts = await Promise.all(files.map(prepareFilePart));
         
-        // 核心修改：在 User Prompt 中再次强调禁止废话
-        const strictUserPrompt = `${context || "开始创作（请使用中文）。"}
-        
------------------------------------------
-[STRICT OUTPUT FORMAT]
-Start DIRECTLY with the Title and Content in Simplified Chinese.
-DO NOT say "My task is...", "Developing content", or "Refining".
-SILENCE MODE: ENABLED.
------------------------------------------
-`;
-
-        const response = await client.models.generateContentStream({
-            model: modelName, 
-            contents: { parts: [{ text: strictUserPrompt }, ...fileParts] },
+        const response = await ai.models.generateContentStream({
+            model: 'gemini-3-pro-preview',
+            contents: { parts: [{ text: context || "请根据提供的背景和资料开始创作。" }, ...fileParts] },
             config: {
                 systemInstruction: systemText,
-                temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.9 
+                temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85
             }
         });
 
@@ -495,40 +401,33 @@ SILENCE MODE: ENABLED.
             const text = chunk.text;
             if (text) {
                 fullText += text;
-                // 实时清洗，防止用户看到英文开头
                 onToken(cleanText(fullText), "");
             }
         }
 
+        // 🟢 流式结束后，解析批量笔记
         let parsedNotes: BulkNote[] = [];
-        const finalCleanText = cleanText(fullText);
-        if (count > 1) parsedNotes = parseBulkNotes(finalCleanText);
-        return { dialogueText: finalCleanText, thought: "", notes: parsedNotes };
-    } catch (e: any) { return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] }; }
+        if (count > 1) {
+            parsedNotes = parseBulkNotes(cleanText(fullText));
+        }
+
+        return { dialogueText: cleanText(fullText), thought: "", notes: parsedNotes };
+    } catch (e: any) {
+        return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] };
+    }
 };
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
-        const { client, modelName } = await getAIClient();
-        // 🔥 强化中文输出指令
-        const prompt = `Task: Analyze the writing style of the provided text.
-Output Language: Simplified Chinese (简体中文).
-
-Rules:
-1. Translate all analysis terms (Tone, Keywords, etc.) to Chinese.
-2. Do NOT output "Analyzing..." or any preamble.
-3. Return the JSON object directly.
-
-Samples:\n${samples}`;
-        
-        const response = await client.models.generateContent({
-            model: modelName, 
+        const ai = await getAIClient(); // Await 初始化
+        const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
             contents: prompt,
             config: {
                 systemInstruction: ANALYSIS_SYSTEM_PROMPT,
                 responseMimeType: "application/json",
-                // Only use schema if using official SDK (ProxyClient handles raw JSON)
-                responseSchema: (client instanceof GoogleGenAI) ? {
+                responseSchema: {
                     type: Type.OBJECT,
                     properties: {
                         tone: { type: Type.STRING },
@@ -538,72 +437,28 @@ Samples:\n${samples}`;
                         writerPersonaPrompt: { type: Type.STRING }
                     },
                     required: ["tone", "keywords", "emojiDensity", "structure", "writerPersonaPrompt"]
-                } : undefined
+                }
             }
         });
         const resultText = response.text || "{}";
         onToken(resultText);
         return extractAndParseJSON(resultText) || { tone: "默认" };
-    } catch (e: any) { return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" }; }
+    } catch (e: any) {
+        console.error("Persona Analysis Error", e);
+        return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" };
+    }
 };
 
 export const testConnection = async () => {
-    let activeConfig = { key: '未知', url: '未知', model: '未知' };
-    
     try {
-        const config = await configRepo.getSystemConfig();
-        const apiKey = config.gemini.apiKey;
-        let baseUrl = config.gemini.baseUrl;
-        const model = config.gemini.model || 'gemini-3-flash-preview';
-
-        if (!apiKey) return { success: false, message: "❌ API Key 为空" };
-
-        if (baseUrl && baseUrl.trim() !== "") {
-            baseUrl = baseUrl.replace(/\/$/, '');
-        } else {
-            baseUrl = "https://generativelanguage.googleapis.com";
-        }
-
-        activeConfig = { key: apiKey, url: baseUrl, model: model };
-
-        // Simple REST check
-        const targetUrl = `${baseUrl}/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const payload = {
-            contents: [{ parts: [{ text: "Respond with 'OK'" }] }]
-        };
-
-        const res = await fetch(targetUrl, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'x-goog-api-key': apiKey // Header auth for broader compatibility
-            },
-            body: JSON.stringify(payload)
+        const ai = await getAIClient(); // Await 初始化
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: 'ping',
+            config: { thinkingConfig: { thinkingBudget: 0 } }
         });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-            let errorMsg = JSON.stringify(data.error || data);
-            if (res.status === 404) errorMsg = "404 Not Found (检查模型名称或网关地址是否正确)";
-            if (res.status === 400) errorMsg = "400 Bad Request (Key 无效或格式错误)";
-            return { 
-                success: false, 
-                message: `❌ 连接失败 (${res.status})\nGateway: ${baseUrl}\nResponse: ${errorMsg}` 
-            };
-        }
-
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No Content";
-        
-        return { 
-            success: true, 
-            message: `✅ 连接成功\nGateway: ${baseUrl}\nModel: ${model}\nResponse: ${text}` 
-        };
-
+        return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
     } catch (e: any) {
-        return { 
-            success: false, 
-            message: `❌ 网络错误 (Fetch Failed)\nError: ${e.message}\nTarget: ${activeConfig.url}` 
-        };
+        return { success: false, message: e.message || "连接发生未知错误" };
     }
 };

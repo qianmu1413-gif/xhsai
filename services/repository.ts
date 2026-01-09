@@ -13,7 +13,7 @@ const safeUUID = () => {
     });
 };
 
-// Helper: Extract Error Message safely
+// Helper: Extract Error Message safely (Fixed [object Object] issue)
 export const getErrorMessage = (error: any): string => {
     if (!error) return 'Unknown error';
     if (typeof error === 'string') return error;
@@ -26,17 +26,17 @@ export const getErrorMessage = (error: any): string => {
     
     // 兜底：转为 JSON 字符串，避免 [object Object]
     try {
-        return JSON.stringify(error);
+        return JSON.stringify(error, null, 2);
     } catch (e) {
-        return String(error);
+        return "Internal Error (Unserializable Object)";
     }
 };
 
-// 默认配置 (纯净版 - 无任何内置第三方服务)
+// 默认配置 (敏感信息已移除，必须从数据库加载)
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
         apiKey: "", 
-        baseUrl: "", // 默认为空，代表使用 Google 官方接口
+        baseUrl: "https://api.vectorengine.ai", 
         model: "gemini-3-flash-preview" 
     },
     xhs: { 
@@ -63,28 +63,10 @@ export const configRepo = {
             const { data } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
             if (data?.value) {
                 const loaded = data.value;
-                
-                // 🟢 纯净合并逻辑：完全信任数据库中的配置
-                const geminiConfig = { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) };
-                
-                // ⚠️ 修复：移除自动清理逻辑。完全信任用户填写的 baseUrl，不做任何过滤。
-                // 之前这里的逻辑会导致部分用户的自定义代理地址被误删。
-                
-                // 仅当模型为空时，提供默认模型名
-                if (!geminiConfig.model || geminiConfig.model.trim() === "") {
-                    geminiConfig.model = DEFAULT_CONFIG.gemini.model;
-                }
-
-                const xhsConfig = { ...DEFAULT_CONFIG.xhs, ...(loaded.xhs || {}) };
-                if (!xhsConfig.apiUrl || xhsConfig.apiUrl.trim() === "") xhsConfig.apiUrl = DEFAULT_CONFIG.xhs.apiUrl;
-
-                const publishConfig = { ...DEFAULT_CONFIG.publish, ...(loaded.publish || {}) };
-                if (!publishConfig.targetUrl || publishConfig.targetUrl.trim() === "") publishConfig.targetUrl = DEFAULT_CONFIG.publish.targetUrl;
-
                 return {
-                    gemini: geminiConfig,
-                    xhs: xhsConfig,
-                    publish: publishConfig,
+                    gemini: { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) },
+                    xhs: { ...DEFAULT_CONFIG.xhs, ...(loaded.xhs || {}) },
+                    publish: { ...DEFAULT_CONFIG.publish, ...(loaded.publish || {}) },
                     cos: { ...DEFAULT_CONFIG.cos, ...(loaded.cos || {}) }
                 };
             }
@@ -94,12 +76,6 @@ export const configRepo = {
 
     saveSystemConfig: async (config: SystemConfig) => {
         if (!supabase) throw new Error("请先连接数据库");
-        
-        // 🟢 修复：仅去除首尾空格和尾部斜杠，不再强制清空包含特定关键词的地址
-        if (config.gemini.baseUrl) {
-            config.gemini.baseUrl = config.gemini.baseUrl.trim().replace(/\/$/, ''); 
-        }
-
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) throw new Error(getErrorMessage(error));
     }
@@ -148,36 +124,39 @@ export const userRepo = {
     try {
         let rawData = null;
 
-        // 🟢 1. 优先尝试 RPC 登录
+        // 🟢 1. 优先尝试 RPC 登录 (这是最高效的方式)
+        // 如果这里报错 (RPC Login Failed)，说明数据库里没有 login_user 函数，会自动降级
         const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
         
+        // 🟢 核心修复：只要 RPC 报错，无论什么错误码，都进行降级处理
         if (rpcError) {
-             const schemaErrors = ['42883', '42P13', '42804'];
-             const isSchemaError = schemaErrors.includes(rpcError.code) || 
-                                   rpcError.message?.includes('structure of query does not match') ||
-                                   rpcError.details?.includes('does not match expected type');
+             // 优化日志：只在开发环境或确实是异常时输出，避免恐慌
+             // 如果是 Function not found (PGRST202)，是预期的降级行为
+             const isFunctionMissing = rpcError.code === 'PGRST202' || rpcError.message?.includes('function') || rpcError.message?.includes('found');
              
-             if (isSchemaError) {
-                 console.warn(`RPC Interface Mismatch (${rpcError.code}), switching to direct query fallback.`);
-                 const { data: directData, error: directError } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('username', cleanUsername)
-                    .eq('password', cleanCode)
-                    .maybeSingle();
-
-                 if (directError) {
-                     return { user: null, error: `登录服务异常 (Fallback): ${getErrorMessage(directError)}` };
-                 }
-                 
-                 if (!directData) {
-                     return { user: null, error: '账号或密码错误' };
-                 }
-                 rawData = directData;
+             if (isFunctionMissing) {
+                console.log(`[Info] RPC Login function not found, switching to direct query fallback.`);
              } else {
-                 console.error("RPC Login Failed:", rpcError);
-                 return { user: null, error: getErrorMessage(rpcError) };
+                console.warn(`[Warn] RPC Login Failed (${rpcError.code || 'Unknown'}), switching to fallback. Error: ${getErrorMessage(rpcError)}`);
              }
+             
+             // 🟡 2. 降级方案: 直接查询 profiles 表
+             // 注意：请务必在 profiles 表的 username 和 password 字段上建立索引，否则此查询会很慢！
+             const { data: directData, error: directError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('username', cleanUsername)
+                .eq('password', cleanCode)
+                .maybeSingle();
+
+             if (directError) {
+                 return { user: null, error: `登录服务异常: ${getErrorMessage(directError)}` };
+             }
+             
+             if (!directData) {
+                 return { user: null, error: '账号或密码错误' };
+             }
+             rawData = directData;
         } else {
             if (rpcData) {
                 rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
@@ -292,7 +271,7 @@ export const userRepo = {
   },
 };
 
-// --- FILE / LINK / PROJECT REPOS ---
+// --- FILE / LINK / PROJECT REPOS (Shortened for brevity but functional) ---
 export const fileRepo = {
     saveUpload: async (userId: string, fileRecord: Partial<UserUpload>) => {
         if (!supabase) return;
@@ -328,6 +307,9 @@ export const projectRepo = {
 
   saveProject: async (userId: string, project: Project): Promise<string | null> => {
     if (!supabase) return null;
+    
+    // 如果是临时ID (temp-开头)，则生成一个新的 UUID 作为数据库主键
+    // 如果是现有ID，则保持不变
     const isNew = project.id.startsWith('temp-');
     const finalId = isNew ? safeUUID() : project.id;
 
