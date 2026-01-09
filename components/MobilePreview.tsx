@@ -1,23 +1,33 @@
 
-// ... (imports remain the same)
 import React, { useState, useRef, useMemo, memo, useEffect } from 'react';
-import { Signal, Wifi, Battery, ChevronLeft, Share2, Plus, Heart, Star, MessageCircle, Edit3, Camera, Loader2, Send, Save, QrCode, CheckCircle2, Download, Trash2, X, FilePlus, ImageIcon, AlertCircle, FolderPlus, Folder, Filter, MoreVertical, Pencil, Check, DownloadCloud, Image as ImageIconLucide, MoreHorizontal, Layers, RotateCcw, MapPin, Lock, Type, Search, CheckSquare } from 'lucide-react';
+import { Signal, Wifi, Battery, ChevronLeft, Share2, Plus, Heart, Star, MessageCircle, Edit3, Camera, Loader2, Send, Save, QrCode, CheckCircle2, Download, Trash2, X, FilePlus, AlertCircle, FolderPlus, Folder, Filter, MoreVertical, Pencil, Check, DownloadCloud, Image as ImageIcon, MoreHorizontal, Layers, RotateCcw, MapPin, Lock, Type, Search, CheckSquare } from 'lucide-react';
 import { NoteDraft, PublishedRecord, User } from '../types';
 import { publishToXHS } from '../services/publishService';
 import Toast, { ToastState } from './Toast';
 
 const DEFAULT_NOTE_IMAGE = "https://images.unsplash.com/photo-1518133910546-b6c2fb7d79e3?q=80&w=1000&auto=format&fit=crop";
 
-// ... (keep getCharacterCount, loadImage, generateShareCard)
-// 字符长度计算 (字母 = 1个字)
+// 🟢 字符长度计算 (升级为加权计算: 中文=1, 英文/数字=0.5)
 const getCharacterCount = (str: string) => {
-  return str ? str.length : 0;
+  if (!str) return 0;
+  let len = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code >= 0 && code <= 127) {
+      len += 0.5;
+    } else {
+      len += 1;
+    }
+  }
+  return Math.ceil(len);
 };
 
 // --- 图片合成核心引擎 (升级版 3:4 比例) ---
 const loadImage = (url: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
-        const img = new Image();
+        // 🛡️ Fix: Use document.createElement('img') to avoid conflict with Lucide 'Image' component
+        // 'new Image()' can sometimes trigger "Illegal constructor" if the global Image object is shadowed
+        const img = document.createElement('img');
         img.crossOrigin = 'Anonymous'; 
         img.onload = () => resolve(img);
         img.onerror = () => {
@@ -25,7 +35,7 @@ const loadImage = (url: string): Promise<HTMLImageElement> => {
                 .then(res => res.blob())
                 .then(blob => {
                     const objUrl = URL.createObjectURL(blob);
-                    const fallbackImg = new Image();
+                    const fallbackImg = document.createElement('img');
                     fallbackImg.onload = () => resolve(fallbackImg);
                     fallbackImg.onerror = reject;
                     fallbackImg.src = objUrl;
@@ -188,7 +198,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   publishedHistory = [], onSavePublished, onDeletePublished, onDeletePublishedBatch,
   onFileUpload, user, activeItemId, setActiveItemId, onNewNote
 }) => {
-  // ... (keep state variables)
   const [activeTab, setActiveTab] = useState<'preview' | 'all'>('preview');
   const [activeFolder, setActiveFolder] = useState<string>('全部');
   const [isPublishing, setIsPublishing] = useState(false);
@@ -335,7 +344,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       }
   };
 
-  // ... (handleBatchDelete, handleBatchArchive etc. remain unchanged)
   const handleBatchDelete = () => {
       const ids: string[] = Array.from(selectedIds) as string[];
       if (ids.length === 0) return;
@@ -365,14 +373,15 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       let count = 0;
       ids.forEach((id: string) => {
           const item = mergedItems.find((i: any) => String(i.id) === id);
-          if (!item) return;
-          if (onSaveToLibrary && item._type === 'draft') {
-               onSaveToLibrary(item.title, item.content, 'note', String(item.id), folderToUse);
-               count++;
-          } else if (onSavePublished && item._type === 'published') {
-               const { _type, timestamp, ...recordData } = item;
-               onSavePublished({ ...recordData, folder: folderToUse });
-               count++;
+          if (item) {
+              if (item._type === 'draft') {
+                   onSaveToLibrary(item.title, item.content, 'note', String(item.id), folderToUse);
+                   count++;
+              } else if (item._type === 'published') {
+                   const { _type, timestamp, ...recordData } = item;
+                   onSavePublished && onSavePublished({ ...recordData, folder: folderToUse });
+                   count++;
+              }
           }
       });
       if (count > 0) showToast(`已将 ${count} 篇笔记移动至 "${folderToUse}"`);
@@ -403,7 +412,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
       }
   };
 
-  // 批量下载 - (自动补全二维码 + 自动清理草稿)
   const handleBatchDownloadQRs = async () => {
       const ids: string[] = Array.from(selectedIds) as string[];
       if (ids.length === 0) return;
@@ -421,7 +429,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
           let recordToUse: PublishedRecord | null = null;
 
           try {
-              // A. 草稿 -> 自动转发布状态
               if (item._type === 'draft') {
                    const validImages = (item.images && item.images.length > 0) ? item.images : [DEFAULT_NOTE_IMAGE];
                    const qrcode = await publishToXHS({ title: item.title, content: item.content || '', imageUrls: validImages });
@@ -433,13 +440,10 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                    };
 
                    if (onSavePublished) onSavePublished(newRecord);
-                   
-                   // 🟢 删除原草稿
                    if (onDeleteDraft) onDeleteDraft(String(item.id)); 
 
                    recordToUse = newRecord;
               } 
-              // B. 已发布 -> 检查/补全二维码
               else {
                   let pubRecord = { ...item } as any;
                   if (!pubRecord.qrCodeUrl) {
@@ -474,11 +478,8 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
   const handlePublish = async () => {
       if (!title.trim()) return showToast("请填写标题", 'error');
       
-      // 🟢 核心修改：发布时不先自动存草稿，防止产生重复草稿记录
-      
       setIsPublishing(true);
       
-      // Generate ID for new published record
       const newId = activeItemId?.startsWith('draft') ? `pub-${Date.now()}` : (activeItemId || `pub-${Date.now()}`);
       
       const optimisticRecord: PublishedRecord = {
@@ -495,26 +496,19 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
           const qrcode = await publishToXHS({ title, content: safeContent, imageUrls: finalImages });
           const finalRecord: PublishedRecord = { ...optimisticRecord, qrCodeUrl: qrcode };
           
-          // 🟢 核心修复：直接调用 onSavePublished，由父组件负责状态切换
-          // 这样不会触发父组件的 Navigation Check (因为不需要调用 setActiveItemId)
           if (onSavePublished) {
               onSavePublished(finalRecord);
           }
           
-          // 🟢 核心修改：如果是从草稿发布的，发布成功后直接删除原草稿
           const isDraft = drafts.some(d => String(d.id) === String(activeItemId));
           if (activeItemId && isDraft && onDeleteDraft) {
               onDeleteDraft(activeItemId);
           }
           
-          // ⚠️ DO NOT call setActiveItemId(newId) here. 
-          // The parent (Workstation) handles the ID switch inside onSavePublished success handler.
-          
           setShowQrModal(finalRecord);
           setActiveTab('all'); 
           showToast("发布成功");
       } catch (e: any) { 
-          // If fail, delete the optimistic published record
           onDeletePublished?.(newId);
           showToast(`发布失败: ${e.message}`, 'error'); 
       } finally { setIsPublishing(false); }
@@ -539,7 +533,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
         <div className="flex-1 overflow-y-auto no-scrollbar bg-white relative">
             {activeTab === 'preview' ? (
                 <div className="flex flex-col animate-fade-in min-h-full pb-[60px] relative">
-                    {/* Header: Preview Mode - Optimized to match XHS Detail View */}
+                    {/* Header */}
                     <div className="h-11 flex items-center justify-between px-3 sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-50/50">
                         <ChevronLeft size={28} className="text-[#333] cursor-pointer hover:text-slate-600 transition-colors" strokeWidth={1.5} onClick={() => setActiveTab('all')} />
                         <div className="flex items-center gap-2 mr-auto ml-2">
@@ -551,7 +545,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                              <button className="bg-rose-50 text-[#ff2442] text-[10px] font-bold px-2.5 py-1 rounded-full ml-1">关注</button>
                         </div>
                         <div className="flex gap-2 text-[#333] items-center">
-                            {/* 🟢 新增：Header上的新建笔记按钮，确保用户能明确看到 */}
                             <button onClick={handleNewNoteWrapper} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600" title="新建笔记"><FilePlus size={20} strokeWidth={1.5}/></button>
                             <button onClick={() => onSaveToLibrary(title, safeContent, 'note', activeItemId || undefined, activeFolder !== '全部' ? activeFolder : undefined)} className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><Save size={20} strokeWidth={1.5}/></button>
                             <button className="p-1.5 hover:bg-slate-100 rounded-full transition-colors text-slate-600"><Share2 size={20} strokeWidth={1.5} /></button>
@@ -600,7 +593,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                     {/* Content Body */}
                     <div className="px-4 py-4 space-y-2 min-h-[400px]">
                         <div className="relative mb-2">
-                            {/* 🟢 优化：使用 Textarea 实现标题自动换行，不再截断 */}
                             <textarea
                                 ref={titleTextareaRef}
                                 value={title}
@@ -611,7 +603,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                     }
                                 }}
                                 onChange={(e) => {
-                                    // 模拟单行输入习惯，回车即换行到正文
                                     const newTitle = e.target.value.replace(/\n/g, ' '); 
                                     onContentChange(`${newTitle}\n${fullBody}`);
                                 }}
@@ -619,7 +610,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                 placeholder="填写标题会有更多赞哦~"
                                 rows={1}
                             />
-                            <div className={`absolute right-0 top-1.5 text-[10px] font-mono ${titleCount > 20 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{titleCount}/20</div>
+                            <div className={`absolute right-0 top-1.5 text-[10px] font-mono px-1.5 py-0.5 rounded ${titleCount > 20 ? 'text-red-500 bg-red-50 font-bold' : 'text-slate-300'}`}>{titleCount}/20</div>
                         </div>
                         <div className="relative">
                             <textarea 
@@ -629,7 +620,10 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                 className="w-full text-[14px] leading-relaxed text-[#333] border-none outline-none resize-none bg-transparent placeholder:text-slate-300 min-h-[400px]" 
                                 placeholder="添加正文" 
                             />
-                            <div className={`text-right text-[10px] font-mono mt-1 ${bodyCount > 1000 ? 'text-red-500 font-bold' : 'text-slate-300'}`}>{bodyCount}/1000</div>
+                            {/* 🟢 Modified: Word count text is now black and bold */}
+                            <div className={`text-right text-[10px] font-mono mt-1`}>
+                                <span className={`px-1.5 py-0.5 rounded ${bodyCount > 1000 ? 'text-red-500 bg-red-50 font-bold' : 'text-black font-bold'}`}>{bodyCount}/1000</span>
+                            </div>
                         </div>
                         <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-50">
                             <button className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 rounded-full text-[12px] text-slate-600 font-medium active:scale-95 transition-transform"><Plus size={12}/> 话题</button>
@@ -709,7 +703,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             )}
         </div>
 
-        {/* ... (Toolbars logic mostly unchanged) ... */}
+        {/* ... (Rest of component remains largely the same, imports fixed) */}
         {activeTab === 'preview' && (
             <div className="absolute bottom-0 left-0 right-0 h-[52px] bg-white border-t border-slate-100 flex items-center px-4 justify-between z-50">
                 <div className="flex-1 bg-slate-100 h-9 rounded-full px-4 flex items-center text-slate-400 text-xs mr-4"><span className="truncate">说点什么...</span></div>
@@ -721,7 +715,7 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             </div>
         )}
 
-        {/* ... (Rest of modal logic) ... */}
+        {/* ... (Rest of logic: Modal handling, selection actions) */}
         {activeTab === 'preview' && !activePublishedRecord && (
             <div className="absolute bottom-[65px] right-4 flex flex-col gap-3 z-50 items-end animate-fade-in">
                 <button onClick={handlePublish} disabled={isPublishing} className="h-9 px-4 bg-[#ff2442] text-white rounded-full shadow-lg flex items-center justify-center gap-1.5 active:scale-90 transition-transform disabled:opacity-50 font-bold text-xs shadow-rose-200/50">
@@ -770,20 +764,13 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
             </div>
         )}
 
-        {/* 🟢 全新设计的二维码预览 Modal (极简高级感) */}
         {showQrModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-xl animate-fade-in" onClick={() => setShowQrModal(null)}>
                 <div className="relative w-full max-w-[340px] flex flex-col gap-6" onClick={e => e.stopPropagation()}>
-                    
-                    {/* 卡片主体 */}
                     <div className="bg-white rounded-[32px] overflow-hidden shadow-2xl shadow-black/20 ring-1 ring-white/20 transition-all duration-300 hover:scale-[1.02]">
                         <div className="relative aspect-[3/4] w-full bg-slate-50 group">
                              <img src={showQrModal.coverImage || showQrModal.imageUrls?.[0]} className="w-full h-full object-cover" />
-                             
-                             {/* 渐变遮罩 */}
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60"></div>
-                             
-                             {/* 底部悬浮信息 */}
                              <div className="absolute bottom-0 left-0 right-0 p-6 flex flex-col justify-end h-full">
                                 <div className="text-white">
                                     <h3 className="text-[20px] font-bold leading-snug line-clamp-2 mb-2 drop-shadow-md">{showQrModal.title || '笔记分享'}</h3>
@@ -795,8 +782,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                                     </div>
                                 </div>
                              </div>
-
-                             {/* 二维码悬浮窗 (右上角) */}
                              <div className="absolute top-4 right-4 w-16 h-16 bg-white/90 backdrop-blur-md rounded-xl p-1.5 shadow-lg border border-white/50">
                                  {showQrModal.qrCodeUrl ? (
                                      <img src={showQrModal.qrCodeUrl} className="w-full h-full object-contain mix-blend-multiply opacity-90"/>
@@ -806,8 +791,6 @@ const MobilePreview: React.FC<MobilePreviewProps> = ({
                              </div>
                         </div>
                     </div>
-
-                    {/* 底部操作栏 */}
                     <div className="flex flex-col gap-3">
                         <button 
                             onClick={() => handleDownloadCard(showQrModal).then(s => s && showToast('已保存到相册'))} 

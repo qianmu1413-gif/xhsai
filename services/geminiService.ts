@@ -42,23 +42,20 @@ const extractAndParseJSON = (text: string): any => {
 
 // --- 文件处理辅助 ---
 
-// 🛡️ Safe ArrayBuffer extraction (Compatible with old browsers & non-standard Blobs)
+// 🛡️ Safe ArrayBuffer extraction
 const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
     return new Promise((resolve, reject) => {
         if (!(blob instanceof Blob)) {
             return reject(new Error("Input is not a Blob"));
         }
-        // Prefer standard method if available and robust
         if (typeof blob.arrayBuffer === 'function') {
             blob.arrayBuffer().then(resolve).catch(() => {
-                // Fallback to FileReader if arrayBuffer() fails (e.g. some polyfills)
                 const reader = new FileReader();
                 reader.onload = () => resolve(reader.result as ArrayBuffer);
                 reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
                 reader.readAsArrayBuffer(blob);
             });
         } else {
-            // Fallback for older environments
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as ArrayBuffer);
             reader.onerror = () => reject(new Error("FileReader failed to read ArrayBuffer"));
@@ -69,14 +66,12 @@ const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
-        // 安全检查
         if (!blob || !(blob instanceof Blob)) {
              return reject(new Error("File blob is empty or invalid type"));
         }
         const reader = new FileReader();
         reader.onload = () => {
              const result = reader.result as string;
-             // 兼容不同浏览器返回格式，确保只取 base64 部分
              const base64 = result.includes(',') ? result.split(',')[1] : result;
              resolve(base64);
         };
@@ -90,16 +85,14 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
-    // 🛡️ 核心修复：添加时间戳，强制浏览器忽略缓存，解决“刷新后CORS报错”的问题
     const cleanUrl = url.split('?')[0]; 
     const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
 
-    // 1. 尝试直连 (带时间戳)
     try {
         const response = await fetch(timestampUrl, { 
             cache: 'no-store', 
             mode: 'cors',
-            credentials: 'omit'  // 不发送 Cookie，防止身份验证导致的 CORS 失败
+            credentials: 'omit'
         }); 
         if (response.ok) return await response.blob();
         if (response.status === 403) throw new Error("403 Forbidden");
@@ -109,24 +102,17 @@ const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
         }
     }
 
-    // 2. 尝试代理 1 (corsproxy.io) - 专门解决 CORS 问题
     try {
-        // 代理也加上原始 URL，不加时间戳防止破坏签名(如果是私有桶)
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
         const res = await fetch(proxyUrl);
         if (res.ok) return await res.blob();
-    } catch (e) {
-        // console.warn("Proxy 1 failed...", e);
-    }
+    } catch (e) {}
 
-    // 3. 尝试代理 2 (allorigins.win) - 备用线路
     try {
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
         const res = await fetch(proxyUrl);
         if (res.ok) return await res.blob();
-    } catch (e) {
-        // console.warn("Proxy 2 failed...", e);
-    }
+    } catch (e) {}
 
     throw new Error("无法从云端下载文件 (可能原因: 防盗链拦截、CORS配置未生效或浏览器缓存锁死)");
 };
@@ -142,7 +128,6 @@ const extractDocxText = async (blob: Blob): Promise<string> => {
     return "[解析器未就绪]";
 };
 
-// 🟢 PDF 解析工具 (依赖 index.html 中的 pdf.js)
 const extractPdfText = async (blob: Blob): Promise<string> => {
     try {
         // @ts-ignore
@@ -157,7 +142,7 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
             const pdf = await loadingTask.promise;
             
             let fullText = "";
-            const maxPages = Math.min(pdf.numPages, 15); // 限制页数防止过载
+            const maxPages = Math.min(pdf.numPages, 15);
             
             for (let i = 1; i <= maxPages; i++) {
                 const page = await pdf.getPage(i);
@@ -178,31 +163,25 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
         let mimeType = file.mimeType || 'text/plain';
         let base64Data = "";
         
-        // 🛡️ 核心修复: JSON序列化后的 file 对象会变成空对象 {}，必须通过 instanceof Blob 过滤
         let blob: Blob | undefined = (file.file instanceof Blob) ? file.file : undefined;
 
-        // 1. 如果有有效的 File/Blob 对象 (刚上传，内存中)，直接使用
         if (blob) {
             mimeType = blob.type || mimeType;
         } 
-        // 2. 如果只有 URL (页面刷新后，或者 file 对象无效)，尝试下载 Blob
         else if (file.data.startsWith('http')) {
             try {
                 blob = await fetchUrlAsBlob(file.data);
-                mimeType = blob.type || mimeType; // 更新真实的 MIME
+                mimeType = blob.type || mimeType;
             } catch (fetchErr: any) {
                 console.warn(`Remote fetch failed for ${file.name}:`, fetchErr);
-                // 🟢 智能降级：返回给 AI 一个明确的 System Prompt
                 return { 
                     text: `[系统警告: 附件 "${file.name}" 读取失败。\n错误原因: ${fetchErr.message}。\n请告知用户："抱歉，我无法读取历史文件 ${file.name}。通常是因为云存储连接超时，请尝试**删除该附件并重新上传**。"]` 
                 };
             }
         }
-        // 3. 如果是 Base64 (旧数据)
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
             base64Data = parts[1];
-            // 尝试恢复 blob 用于 PDF 解析
              if (file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
                  try {
                     const binaryStr = atob(base64Data);
@@ -215,7 +194,6 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
 
         if (!blob && !base64Data) return { text: `[读取失败: ${file.name}]` };
 
-        // 🟢 PDF 智能处理
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
             if (blob) {
                 const pdfText = await extractPdfText(blob);
@@ -223,25 +201,20 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
                      return { text: `[PDF文档内容 ${file.name}]:\n${pdfText}` };
                 }
             }
-            // 降级：如果解析不出文本，尝试发图片 (Base64)
             if (base64Data) return { inlineData: { mimeType: 'application/pdf', data: base64Data } };
             if (blob) return { inlineData: { mimeType: 'application/pdf', data: await blobToBase64(blob) } };
         } 
         
-        // 图片
         else if (mimeType.startsWith('image/')) {
             if (base64Data) return { inlineData: { mimeType, data: base64Data } };
             if (blob) return { inlineData: { mimeType, data: await blobToBase64(blob) } };
         } 
         
-        // DOCX
         else if (file.name.endsWith('.docx') && blob) {
             return { text: `[文档内容 ${file.name}]:\n${await extractDocxText(blob)}` };
         } 
         
-        // 纯文本
         else if (blob) {
-            // text() also needs to be handled if blob is not standard, but assuming blobToBase64 check passed
             return { text: `[文档内容 ${file.name}]:\n${await blob.text()}` };
         }
         
@@ -253,15 +226,9 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     }
 };
 
-// 🟢 动态获取 Client，支持从数据库读取 Key 和 BaseURL (代理)
 const getAIClient = async () => {
-    // 从 Supabase 配置中读取，如果没配则使用默认值
     const config = await configRepo.getSystemConfig();
-    
-    // 优先使用 Config 中的 Key，没有则尝试环境变量
     const apiKey = config.gemini.apiKey || process.env.API_KEY;
-    
-    // ⚠️ 关键：必须使用 BaseURL (代理地址) 来解决国内 Failed to fetch 问题
     const baseUrl = config.gemini.baseUrl;
 
     if (!apiKey) {
@@ -270,14 +237,14 @@ const getAIClient = async () => {
 
     return new GoogleGenAI({ 
         apiKey: apiKey,
-        baseUrl: baseUrl // 注入代理地址 (e.g. https://api.vectorengine.ai)
+        baseUrl: baseUrl 
     });
 };
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件可分析";
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const ai = await getAIClient();
         const fileParts = await Promise.all(files.map(prepareFilePart));
         const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
         const response = await ai.models.generateContent({
@@ -294,28 +261,21 @@ export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> =
 // 解析批量生成的笔记
 const parseBulkNotes = (text: string): BulkNote[] => {
     const notes: BulkNote[] = [];
-    // 匹配 "### 方案N" 或 "### 笔记N" 这样的分隔符
     const parts = text.split(/###\s*(?:方案|笔记|Version)\s*\d+/i);
     
-    // 忽略第一个空部分（如果文本以分隔符开头）
     for (let i = 1; i < parts.length; i++) {
         const part = parts[i].trim();
         if (!part) continue;
 
-        // 尝试提取标题和正文
-        // 格式通常是 "标题：xxx \n 正文：xxx"
+        const titleMatch = part.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
         let title = "";
         let content = "";
 
-        const titleMatch = part.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
         if (titleMatch) {
             title = titleMatch[1].trim();
-            // 剩下的部分，去掉标题行就是正文
             content = part.replace(titleMatch[0], "").trim();
-            // 去掉可能的 "正文：" 前缀
             content = content.replace(/^(?:正文|Content)[:：]\s*/i, "").trim();
         } else {
-            // 如果没有明确的标题标签，取第一行做标题
             const lines = part.split('\n');
             title = lines[0].trim();
             content = lines.slice(1).join('\n').trim();
@@ -328,6 +288,32 @@ const parseBulkNotes = (text: string): BulkNote[] => {
     return notes;
 };
 
+// 🟢 解析单篇笔记
+const parseSingleNote = (text: string): BulkNote | null => {
+    if (!text) return null;
+    
+    // 尝试匹配标准的 "标题：... 正文：..." 格式
+    const titleMatch = text.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
+    if (titleMatch) {
+        const title = titleMatch[1].trim();
+        let content = text.replace(titleMatch[0], "").trim();
+        content = content.replace(/^(?:正文|Content)[:：]\s*/i, "").trim();
+        return { title, content };
+    }
+    
+    // 降级策略：假设第一行是标题，剩余是正文
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length > 0) {
+        const title = lines[0];
+        const content = lines.slice(1).join('\n');
+        // 如果没有正文，说明可能只有一句话，也作为 content 处理比较好，但作为笔记通常有标题
+        if (!content) return { title: '未命名笔记', content: title };
+        return { title, content };
+    }
+    
+    return null;
+};
+
 export const streamExpertGeneration = async (
     context: string,
     files: AttachedFile[],
@@ -338,7 +324,6 @@ export const streamExpertGeneration = async (
     onToken: (text: string, thought: string) => void
 ) => {
     
-    // 极致的字数硬约束
     const wordCountConstraint = `
 🚨 **字数硬性指标 (非常重要)**:
 生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。
@@ -381,10 +366,16 @@ ${wordCountConstraint}
 正文：(方案2的内容)
 
 ...以此类推。不要包含其他开场白或结束语。`;
+    } else {
+        // 单篇生成指令，强制格式以便解析
+        systemText += `\n\n🚨 **格式指令**:\n请务必按以下格式输出，以便系统自动填入编辑器：
+标题：(笔记标题)
+正文：(笔记正文)
+`;
     }
 
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const ai = await getAIClient(); 
         const fileParts = await Promise.all(files.map(prepareFilePart));
         
         const response = await ai.models.generateContentStream({
@@ -405,13 +396,17 @@ ${wordCountConstraint}
             }
         }
 
-        // 🟢 流式结束后，解析批量笔记
+        const cleaned = cleanText(fullText);
+        // 🟢 流式结束后，解析笔记 (无论是单篇还是批量，都返回 notes 数组)
         let parsedNotes: BulkNote[] = [];
         if (count > 1) {
-            parsedNotes = parseBulkNotes(cleanText(fullText));
+            parsedNotes = parseBulkNotes(cleaned);
+        } else {
+            const single = parseSingleNote(cleaned);
+            if (single) parsedNotes = [single];
         }
 
-        return { dialogueText: cleanText(fullText), thought: "", notes: parsedNotes };
+        return { dialogueText: cleaned, thought: "", notes: parsedNotes };
     } catch (e: any) {
         return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] };
     }
@@ -419,7 +414,7 @@ ${wordCountConstraint}
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const ai = await getAIClient();
         const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-preview',
@@ -451,7 +446,7 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 
 export const testConnection = async () => {
     try {
-        const ai = await getAIClient(); // Await 初始化
+        const ai = await getAIClient();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: 'ping',

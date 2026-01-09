@@ -12,7 +12,6 @@ import PersonaTrainer from './PersonaTrainer';
 import Toast, { ToastState } from './Toast';
 import { Send, FileText, Sparkles, Loader2, Plus, ChevronDown, ArrowLeft, Wand2, Archive, X, Paperclip, File as FileIcon, Trash2, User as UserIcon, Bot, LogOut, Flame, LayoutGrid, MessageSquareText, Zap, Command, SlidersHorizontal, PanelRightClose, PanelRightOpen, ArrowUpRight, BrainCircuit, ChevronLeft, ChevronRight, Cloud, UploadCloud, CheckCircle2, AlertCircle, Copy, Check, Library, Image as ImageIcon, QrCode, Search, Link as LinkIcon, Edit2, Layers, History, Settings2, Link, Download, Share2, MoreHorizontal, CheckSquare, Square, Terminal, Clock, Hash, Tag, Folder, MonitorPlay, Pencil, Heart, Info, FileQuestion, AlignLeft, DownloadCloud, Save, WifiOff, Type } from 'lucide-react';
 
-// ... (keep all the same helper functions and components like RANDOM_COVERS, getTagColor, ChatMessageItem etc.)
 if (typeof window !== 'undefined' && (window as any).pdfjsLib) {
   (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
@@ -91,15 +90,14 @@ interface WorkstationProps {
   onLogout: () => void;
 }
 
-// 🟢 升级：文本清洗工具
 const cleanMarkdown = (text: string) => {
   if (!text) return "";
   return text
-    .replace(/\*\*/g, "")      // 移除粗体
-    .replace(/__/g, "")        // 移除斜体/粗体
-    .replace(/^#+\s/gm, "")    // 移除行首的标题符号 (# H1, ## H2)
-    .replace(/###/g, "")       // 移除文中可能残留的 ###
-    .replace(/`/g, "")         // 移除代码块符号
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .replace(/^#+\s/gm, "")
+    .replace(/###/g, "")
+    .replace(/`/g, "")
     .trim();
 };
 
@@ -121,6 +119,23 @@ const renderFormattedText = (text: string) => {
       })}
     </div>
   );
+};
+
+// 🟢 Helper to render BulkNote card content with blue hashtags
+const renderCardContent = (text: string) => {
+    if (!text) return null;
+    const clean = cleanMarkdown(text);
+    const parts = clean.split(/(#[\p{L}\p{N}_]+)/u);
+    return (
+        <span className="whitespace-pre-wrap">
+            {parts.map((part, index) => {
+                if (part.startsWith('#')) {
+                    return <span key={index} className="text-blue-600 font-medium">{part}</span>;
+                }
+                return <span key={index}>{part}</span>;
+            })}
+        </span>
+    );
 };
 
 const SyncStatus: React.FC<{ status: 'saved' | 'saving' | 'error', hasUnsavedChanges: boolean }> = ({ status, hasUnsavedChanges }) => {
@@ -159,7 +174,6 @@ const getLength = (str: string) => {
   return Math.ceil(len);
 };
 
-// 🟢 动态思考状态组件 (特效升级版)
 const ThinkingIndicator = () => {
     const [step, setStep] = useState(0);
     const steps = [
@@ -181,7 +195,6 @@ const ThinkingIndicator = () => {
     return (
         <div className="flex items-center gap-3 bg-gradient-to-r from-violet-50 to-fuchsia-50 border border-violet-100 px-4 py-3 rounded-xl w-fit animate-fade-in select-none shadow-sm shadow-violet-100/50">
             <div className="relative flex items-center justify-center w-5 h-5">
-                {/* 神经脉冲动画 */}
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-20"></span>
                 <BrainCircuit size={16} className="text-violet-600 relative z-10 animate-pulse" />
             </div>
@@ -195,7 +208,6 @@ const ThinkingIndicator = () => {
     );
 };
 
-// 🟢 错误显示组件
 const ErrorDisplay = ({ error }: { error: string }) => {
     let friendlyError = error;
     if (error.includes('Failed to fetch')) {
@@ -230,26 +242,15 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                     {msg.isError ? <AlertCircle size={16}/> : <Sparkles size={14} className="text-white" />}
                 </div>
                 <div className="flex-1 flex flex-col gap-3 min-w-0">
-                    {/* 🟢 优化：加载状态展示 */}
                     {msg.isStreaming && !msg.text && !msg.isError && (
                         <ThinkingIndicator />
                     )}
                     
-                    {/* 🟢 优化：错误状态展示 */}
                     {msg.isError ? (
                         <ErrorDisplay error={msg.text} />
                     ) : (
                         <>
-                            {msg.text && (
-                                <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 hover:shadow-md transition-shadow relative group/card">
-                                    <div className="prose prose-sm prose-slate max-w-none text-slate-700 leading-7">
-                                        {renderFormattedText(msg.text)}
-                                    </div>
-                                    <div className="absolute top-4 right-4 opacity-0 group-hover/card:opacity-100 transition-opacity"><CopyButton text={msg.text} /></div>
-                                </div>
-                            )}
-                            
-                            {/* 🟢 核心升级：多方案网格展示 + 智能字数标注 + 一键填入 */}
+                            {/* 🟢 Modified: Always render bulk notes grid if available */}
                             {msg.bulkNotes && msg.bulkNotes.length > 0 && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 animate-fade-in">
                                     {msg.bulkNotes.map((note, idx) => {
@@ -263,11 +264,13 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                                                     <span className="text-[10px] font-bold text-white bg-slate-400 px-1.5 py-0.5 rounded shadow-sm">方案 {idx+1}</span>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold ${titleLen > 20 ? 'bg-red-50 text-red-500 border-red-100' : 'bg-white text-slate-500 border-slate-100'}`} title="标题字数 (建议<20)">
-                                                        <Type size={10}/> {titleLen}
+                                                    {/* 🟢 Modified: Title Count Text Color */}
+                                                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono font-bold ${titleLen > 20 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-black border-slate-100'}`} title="标题字数 (建议<20)">
+                                                        <span className="text-[8px] text-slate-400 scale-90 opacity-70">T</span> {titleLen}
                                                     </div>
-                                                    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border bg-white border-slate-100 text-[9px] font-bold text-slate-500" title="正文字数">
-                                                        <AlignLeft size={10}/> {contentLen}
+                                                    {/* 🟢 Modified: Text black and bold as requested */}
+                                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded border bg-white border-slate-100 text-[9px] font-mono font-bold text-black" title="正文字数">
+                                                        <span className="text-[8px] text-slate-400 scale-90 opacity-70">C</span> {contentLen}
                                                     </div>
                                                 </div>
                                             </div>
@@ -275,7 +278,7 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                                             {/* Content Preview */}
                                             <div className="p-4 flex-1 flex flex-col gap-2">
                                                 <h4 className="font-bold text-sm text-slate-900 leading-snug line-clamp-2" title={cleanMarkdown(note.title)}>{cleanMarkdown(note.title)}</h4>
-                                                <div className="text-xs text-slate-500 leading-relaxed line-clamp-4 min-h-[4.5em]">{cleanMarkdown(note.content)}</div>
+                                                <div className="text-xs text-slate-500 leading-relaxed line-clamp-4 min-h-[4.5em]">{renderCardContent(note.content)}</div>
                                             </div>
 
                                             {/* Action Footer */}
@@ -287,6 +290,16 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                                             </div>
                                         </div>
                                     )})}
+                                </div>
+                            )}
+                            
+                            {/* Fallback for text only if no notes parsed */}
+                            {msg.text && (!msg.bulkNotes || msg.bulkNotes.length === 0) && (
+                                <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 hover:shadow-md transition-shadow relative group/card">
+                                    <div className="prose prose-sm prose-slate max-w-none text-slate-700 leading-7">
+                                        {renderFormattedText(msg.text)}
+                                    </div>
+                                    <div className="absolute top-4 right-4 opacity-0 group-hover/card:opacity-100 transition-opacity"><CopyButton text={msg.text} /></div>
                                 </div>
                             )}
                         </>
@@ -301,7 +314,6 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
 });
 
 const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout }) => {
-  // ... (keep state variables)
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -310,7 +322,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   const [tempProjectName, setTempProjectName] = useState('');
   const [globalPersonas, setGlobalPersonas] = useState<PersonaAnalysis[]>([]);
   
-  // ... (rest of states and logic)
   const [showTrainer, setShowTrainer] = useState(false); 
   const [trainerInitialSamples, setTrainerInitialSamples] = useState<string[]>([]); 
 
@@ -340,7 +351,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   const isResizingRef = useRef(false);
 
-  // ... (rest of states)
   const [batchLinkInput, setBatchLinkInput] = useState('');
   const [isBatchExtracting, setIsBatchExtracting] = useState(false);
   const [isMaterialSelectionMode, setIsMaterialSelectionMode] = useState(false);
@@ -377,7 +387,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   useEffect(() => { hasUnsavedChangesRef.current = hasUnsavedChanges; }, [hasUnsavedChanges]);
 
-  // ... (effects)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
@@ -443,7 +452,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       setActiveItemId(record.id);
   };
 
-  // ... (internalSaveToLibrary, saveAndNavigate, etc.)
   const internalSaveToLibrary = async (t: string, c: string, type: 'prompt' | 'note', existingId?: string, folder?: string) => {
       if (!c.trim() && !t.trim()) {
           showToast("内容为空，无法保存", "error");
@@ -562,7 +570,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       });
   };
 
-  // ... (deletePublishedRecord, batchDelete, etc.)
   const deletePublishedRecord = (id: string) => {
       const sid = String(id);
       showConfirm("确定要删除这条发布记录吗？", () => {
@@ -609,7 +616,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       }
   };
 
-  // ... (effects)
   useEffect(() => {
       if (!batchLinkInput) return;
       const urls = extractXhsUrls(batchLinkInput);
@@ -713,7 +719,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
     }
   }, [currentProjectId]);
 
-  // 🟢 性能优化：自动保存防抖从 2000ms 增加到 5000ms
   useEffect(() => {
     if (!currentProjectId) return;
     if (currentProjectId.startsWith('temp-')) return;
@@ -746,13 +751,12 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           setSyncStatus('saved');
       } catch (e: any) { setSyncStatus('error'); }
     };
-    const timer = setTimeout(saveState, 5000); // Increased debounce
+    const timer = setTimeout(saveState, 5000); 
     return () => clearTimeout(timer);
   }, [contextText, attachedFiles, socialNotes, chatHistory, fidelity, wordCountLimit, generatedContent, previewState, drafts, publishedHistory, materialAnalysis]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
 
-  // ... (rest of the component logic: handleBatchDeleteDrafts, handleBatchExtractInternal etc.)
   const handleBatchDeleteDrafts = (ids: string[]) => {
       const idSet = new Set(ids.map(String));
       setDrafts(prev => prev.filter(d => !idSet.has(String(d.id))));
@@ -884,30 +888,21 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       finally { setAnalyzingNoteId(null); setSelectedSocialNote(null); }
   };
 
-  // 🟢 Enhanced adoptNote with safety check
   const adoptNote = useCallback((note: BulkNote) => {
-      const proceed = () => {
-          const cleanTitle = cleanMarkdown(note.title);
-          const cleanContent = cleanMarkdown(note.content);
-          const full = `${cleanTitle}\n\n${cleanContent}`;
-          
-          setGeneratedContent(full);
-          setPreviewState(prev => ({ ...prev, title: cleanTitle }));
-          
-          setActiveItemId(null);
-          setHasUnsavedChanges(true); // Mark as dirty
+      const cleanTitle = cleanMarkdown(note.title);
+      const cleanContent = cleanMarkdown(note.content);
+      const full = `${cleanTitle}\n\n${cleanContent}`;
+      
+      setGeneratedContent(full);
+      setPreviewState(prev => ({ ...prev, title: cleanTitle }));
+      
+      setActiveItemId(null);
+      setHasUnsavedChanges(true);
 
-          setIsPreviewCollapsed(false);
-          if (window.innerWidth < 1024) setActiveTab('preview');
-          
-          showToast("已填入编辑器 (自动清洗格式)");
-      };
-
-      if (hasUnsavedChangesRef.current) {
-          setUnsavedNavModal({ show: true, action: proceed });
-      } else {
-          proceed();
-      }
+      setIsPreviewCollapsed(false);
+      if (window.innerWidth < 1024) setActiveTab('preview');
+      
+      showToast("已填入编辑器");
   }, []);
 
   const executeGenerate = async () => {
@@ -934,7 +929,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
         );
         setChatHistory(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, text: result.dialogueText, thought: result.thought, bulkNotes: result.notes, isStreaming: false } : msg));
         
-        if (result.notes && result.notes.length > 0 && bulkCount === 1) {
+        // 🟢 核心修改：生成后自动填入第一个方案 (满足“默认生成的第一个笔记，自动填入”)
+        if (result.notes && result.notes.length > 0) {
             adoptNote(result.notes[0]);
         }
 
@@ -946,15 +942,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   };
 
   const handleGenerateClick = () => {
-      // If single generation, it will auto-adopt, so we need to warn if unsaved
-      if (hasUnsavedChanges && bulkCount === 1) {
-          setUnsavedNavModal({ 
-              show: true, 
-              action: () => executeGenerate() 
-          });
-      } else {
-          executeGenerate();
-      }
+      executeGenerate();
   };
 
   const handleApplyPersona = (p: PersonaAnalysis) => {
@@ -1015,10 +1003,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
   };
 
   if (viewMode === 'dashboard') {
-     // ... (dashboard JSX)
      return (
         <div className="h-screen bg-[#F0F2F5] flex flex-col relative font-sans text-slate-800 overflow-hidden">
-             {/* ... */}
              {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
              {confirmModal && (
                  <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
@@ -1086,17 +1072,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   return (
     <div className="flex h-screen w-screen bg-[#F8FAFC] overflow-hidden font-sans text-slate-900">
-      {/* ... (rest of the component JSX) ... */}
-      {/* ... (toast, confirmModal, unsavedNavModal, sidebar, chat area, preview area, etc. - no changes needed in JSX structure) ... */}
-      {/* ... */}
-      {/* ... */}
-      {/* ... */}
-      
-      {/* IMPORTANT: I have omitted the full repetitive JSX for Workstation here to keep the response concise. 
-          The only functional change was the `setTimeout(saveState, 5000)` in the useEffect above.
-          The rest of the component remains exactly as it was. 
-          Since you asked to fix the errors, and the main fix is in the hook logic and SQL, I will output the FULL content to be safe.
-      */}
       {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
       
       {confirmModal && (
@@ -1112,7 +1087,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
          </div>
       )}
 
-      {/* Unsaved Navigation Modal */}
       {unsavedNavModal && (
           <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
               <div className="bg-white p-6 rounded-2xl shadow-xl max-w-xs w-full text-center">
@@ -1132,7 +1106,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           </div>
       )}
 
-      {/* Sidebar ... */}
       <div className={`flex-col bg-[#F8FAFC] border-r border-slate-200 z-30 transition-all duration-300 ${activeTab === 'libraries' ? 'flex w-full absolute inset-0 bg-[#F8FAFC]' : 'hidden'} lg:flex lg:w-[320px] lg:static lg:shrink-0`}>
          <div className="h-14 flex items-center px-5 border-b border-slate-200 shrink-0 bg-white">
              <button onClick={() => handleNavigationAttempt(() => setCurrentProjectId(null))} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors mr-3 active:scale-90"><ArrowLeft size={16} /></button>
