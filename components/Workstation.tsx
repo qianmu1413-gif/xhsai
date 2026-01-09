@@ -299,6 +299,17 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                                     <div className="prose prose-sm prose-slate max-w-none text-slate-700 leading-7">
                                         {renderFormattedText(msg.text)}
                                     </div>
+                                    {/* Stats Footer for Fallback */}
+                                    <div className="mt-4 pt-3 border-t border-slate-50 flex justify-end items-center gap-3">
+                                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                                            <span>标题:</span> 
+                                            <span className={`font-bold ${getLength(msg.text.split('\n')[0]) > 20 ? 'text-red-500' : 'text-slate-700'}`}>{getLength(msg.text.split('\n')[0])}</span>
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                                            <span>总字数:</span> 
+                                            <span className="font-bold text-slate-700">{getLength(msg.text)}</span>
+                                        </div>
+                                    </div>
                                     <div className="absolute top-4 right-4 opacity-0 group-hover/card:opacity-100 transition-opacity"><CopyButton text={msg.text} /></div>
                                 </div>
                             )}
@@ -932,6 +943,10 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
         // 🟢 核心修改：生成后自动填入第一个方案 (满足“默认生成的第一个笔记，自动填入”)
         if (result.notes && result.notes.length > 0) {
             adoptNote(result.notes[0]);
+        } else if (result.dialogueText) {
+            // Fallback: adopt the whole text as content, first line as title
+            const lines = result.dialogueText.split('\n');
+            adoptNote({ title: lines[0] || '未命名', content: result.dialogueText });
         }
 
         onUserUpdate({ ...user, quotaRemaining: Math.max(0, user.quotaRemaining - 1) });
@@ -1359,157 +1374,75 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
               <div className="w-full max-w-2xl bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 p-2 flex flex-col gap-2 transition-all ring-1 ring-slate-100 focus-within:ring-2 focus-within:ring-rose-500/20 focus-within:border-rose-400">
                   <textarea ref={textareaRef} value={currentInput} onChange={(e) => setCurrentInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleGenerateClick()} placeholder="输入创作指令..." className="w-full max-h-32 bg-transparent border-none outline-none text-sm font-medium px-3 py-2 resize-none placeholder:text-slate-400 text-slate-900" rows={1} />
                   <div className="flex justify-between items-center px-2 pb-1">
-                      <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-0.5 border border-slate-100">
-                              <button onClick={() => setFidelity(FidelityMode.CREATIVE)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all active:scale-95 ${fidelity === FidelityMode.CREATIVE ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>创意</button>
-                              <button onClick={() => setFidelity(FidelityMode.STRICT)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all active:scale-95 ${fidelity === FidelityMode.STRICT ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>严谨</button>
-                          </div>
-                          <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-2 py-1 border border-slate-100 ml-2">
-                             <span className="text-[10px] font-bold text-slate-400 w-12 text-center">{wordCountLimit}字</span>
-                             <input type="range" min="100" max="2000" step="50" value={wordCountLimit} onChange={(e) => setWordCountLimit(Number(e.target.value))} className="w-24 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"/>
-                          </div>
-                          <div className="flex gap-1 ml-2">
-                             {[1,3,5].map(n => <button key={n} onClick={() => setBulkCount(n)} className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold transition-colors active:scale-90 ${bulkCount === n ? 'bg-slate-900 text-white' : 'text-slate-400 hover:bg-slate-100'}`}>{n}</button>)}
-                          </div>
+                      <div className="flex gap-1">
+                          <button onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors active:scale-95" title="上传附件"><Paperclip size={18}/></button>
                       </div>
-                      <button onClick={handleGenerateClick} disabled={isGenerating || (!currentInput && attachedFiles.length === 0)} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 ${isGenerating ? 'bg-slate-100 text-slate-300' : 'bg-slate-900 text-white hover:bg-black hover:scale-105 shadow-md'}`}>
-                          {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                      </button>
+                      <div className="flex items-center gap-2">
+                           <span className="text-[10px] text-slate-300 hidden md:inline-block">Enter 发送</span>
+                           <button onClick={handleGenerateClick} disabled={isGenerating} className={`p-2 rounded-lg transition-all active:scale-95 shadow-lg ${isGenerating ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 text-white hover:bg-black'}`}>
+                               {isGenerating ? <Loader2 size={18} className="animate-spin"/> : <ArrowRight size={18}/>}
+                           </button>
+                      </div>
                   </div>
               </div>
           </div>
       </div>
 
-      {!isPreviewCollapsed && (
-          <div style={{ width: window.innerWidth >= 1024 ? rightPanelWidth : '100%' }} className={`flex-col bg-[#F8FAFC] z-20 transition-all border-l border-slate-200 relative ${activeTab === 'preview' ? 'flex w-full absolute inset-0' : 'hidden'} lg:flex lg:shrink-0 lg:static`}>
-              <div className="hidden lg:block absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-rose-500/50 z-50 transition-colors" onMouseDown={() => { isResizingRef.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }}></div>
-              <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 shrink-0 bg-[#F8FAFC]">
-                   <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">效果预览</span>
-                   <button onClick={() => setActiveTab('chat')} className="lg:hidden p-2 text-slate-400 active:scale-90"><X size={18} /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-8 flex justify-center items-start">
-                 <MobilePreview 
-                    content={generatedContent} 
-                    onContentChange={(c) => { setGeneratedContent(c); setHasUnsavedChanges(true); }}
-                    onCopy={() => { navigator.clipboard.writeText(generatedContent); showToast("已复制"); }} 
-                    drafts={drafts} 
-                    onDeleteDraft={deleteDraft} 
-                    onDeleteDraftBatch={handleBatchDeleteDrafts}
-                    images={previewState.images}
-                    onImagesChange={(imgs) => { setPreviewState(prev => ({ ...prev, images: imgs })); setHasUnsavedChanges(true); }}
-                    onSaveToLibrary={internalSaveToLibrary} 
-                    publishedHistory={publishedHistory} 
-                    onSavePublished={handlePublishSuccess} 
-                    onDeletePublished={deletePublishedRecord} 
-                    onDeletePublishedBatch={batchDeletePublishedRecords} 
-                    onFileUpload={handleMobileFileUpload} 
-                    user={user} 
-                    activeItemId={activeItemId}
-                    setActiveItemId={handleMobileItemSelect}
-                    onNewNote={handleCreateNewDraft}
-                 />
-              </div>
+      {/* Right Panel - Mobile Preview */}
+      <div className={`border-l border-slate-200 bg-[#F0F2F5] flex-col shrink-0 transition-all duration-300 z-20 ${isPreviewCollapsed ? 'hidden' : 'flex'} ${activeTab === 'preview' ? 'w-full absolute inset-0' : 'hidden lg:flex'}`} style={{ width: activeTab === 'preview' ? '100%' : rightPanelWidth }}>
+           <div className="flex-1 overflow-hidden flex flex-col items-center justify-center p-4 lg:p-8 bg-[#F0F2F5] relative">
+              <MobilePreview 
+                  content={generatedContent} 
+                  onContentChange={setGeneratedContent} 
+                  onCopy={() => { navigator.clipboard.writeText(generatedContent); showToast("内容已复制"); }}
+                  onSaveToLibrary={internalSaveToLibrary}
+                  drafts={drafts}
+                  onDeleteDraft={deleteDraft}
+                  onDeleteDraftBatch={handleBatchDeleteDrafts}
+                  images={previewState.images}
+                  onImagesChange={(imgs) => setPreviewState(prev => ({ ...prev, images: imgs }))}
+                  publishedHistory={publishedHistory}
+                  onSavePublished={handlePublishSuccess}
+                  onDeletePublished={deletePublishedRecord}
+                  onDeletePublishedBatch={batchDeletePublishedRecords}
+                  onFileUpload={handleMobileFileUpload}
+                  user={user}
+                  activeItemId={activeItemId}
+                  setActiveItemId={handleMobileItemSelect}
+                  onNewNote={handleCreateNewDraft}
+              />
           </div>
-      )}
-
-      {selectedSocialNote && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedSocialNote(null)}>
-               <div className="w-full max-w-5xl h-[85vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => setSelectedSocialNote(null)} className="absolute top-4 left-4 p-2 bg-black/50 text-white rounded-full z-50 active:scale-90"><X size={20}/></button>
-                    <div className="w-[60%] bg-black flex items-center justify-center relative group">
-                        <img src={selectedSocialNote.images[currentModalImgIdx]?.url} className="max-h-full max-w-full"/>
-                    </div>
-                    <div className="w-[40%] bg-white p-8 overflow-y-auto">
-                        <h2 className="text-xl font-bold mb-4">{selectedSocialNote.title}</h2>
-                        <p className="text-sm text-slate-600 whitespace-pre-wrap">{selectedSocialNote.desc}</p>
-                        <button onClick={() => handleDirectAnalysis(selectedSocialNote)} disabled={analyzingNoteId === selectedSocialNote.noteId} className={`mt-8 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${ analyzingNoteId === selectedSocialNote.noteId ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-black active:scale-[0.98]' }`}>
-                            {analyzingNoteId === selectedSocialNote.noteId ? ( <> <Loader2 size={18} className="animate-spin" /> 正在深度分析... </> ) : ( <> <Sparkles size={18} /> 提取人设 </> )}
-                        </button>
-                    </div>
-               </div>
-          </div>
-      )}
-
-      {editingPersona && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[250] flex items-center justify-center p-6 animate-fade-in" onClick={() => setEditingPersona(null)}>
-              <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-5" onClick={e => e.stopPropagation()}>
-                  <h3 className="font-bold text-lg flex items-center gap-2 text-slate-800"><Settings2 size={20}/> 编辑人设</h3>
-                  <div>
-                      <label className="text-xs font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">人设名称 (Tone)</label>
-                      <input value={editingPersona.tone} onChange={e => setEditingPersona({...editingPersona, tone: e.target.value})} className="w-full border border-slate-200 p-3 rounded-xl text-sm font-bold text-indigo-900 bg-slate-50 focus:bg-white focus:border-indigo-300 outline-none transition-all"/>
-                  </div>
-                  <div>
-                      <label className="text-xs font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">分类 & 标签</label>
-                      <div className="flex flex-col gap-2">
-                          <input value={editingPersona.category || ''} onChange={e => setEditingPersona({...editingPersona, category: e.target.value})} placeholder="分类" className="w-full border border-slate-200 p-2.5 rounded-xl text-sm bg-slate-50 focus:bg-white outline-none"/>
-                          <div className="flex flex-wrap gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100 min-h-[42px]">
-                              {editingPersona.tags?.map((tag, idx) => ( <span key={idx} className={`text-[10px] font-bold px-2 py-1 rounded-lg border flex items-center gap-1 ${getTagColor(tag)}`}>{tag} <button onClick={() => setEditingPersona({...editingPersona, tags: editingPersona.tags?.filter((_, i) => i !== idx)})} className="opacity-50 hover:opacity-100 ml-1">×</button> </span> ))}
-                              <input placeholder="+ 标签" onKeyDown={(e) => { if (e.key === 'Enter') { const val = e.currentTarget.value.trim(); if (val) { setEditingPersona({...editingPersona, tags: [...(editingPersona.tags || []), val]}); e.currentTarget.value = ''; } } }} className="text-xs bg-transparent outline-none flex-1 min-w-[60px]"/>
-                          </div>
-                      </div>
-                  </div>
-                  <div>
-                      <label className="text-xs font-bold text-slate-400 block mb-1.5 uppercase tracking-wider">系统指令 (System Prompt)</label>
-                      <textarea value={editingPersona.writerPersonaPrompt} onChange={e => setEditingPersona({...editingPersona, writerPersonaPrompt: e.target.value})} className="w-full h-40 border border-slate-200 p-3 rounded-xl text-[11px] font-mono leading-relaxed resize-none bg-slate-900 text-slate-300 outline-none focus:ring-2 focus:ring-indigo-500/30 custom-scrollbar"/>
-                  </div>
-                  <div className="flex gap-3 pt-2">
-                      <button onClick={() => setEditingPersona(null)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors active:scale-95">取消</button>
-                      <button onClick={handleSaveEditedPersona} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 active:scale-95"><CheckCircle2 size={16}/> 保存并应用</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {qrModalRecord && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in" onClick={() => setQrModalRecord(null)}>
-              <div className="relative w-full max-w-[320px] rounded-[24px] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-                  <div className="relative aspect-[3/4] w-full">
-                       <img src={qrModalRecord.coverImage || qrModalRecord.imageUrls?.[0]} className="absolute inset-0 w-full h-full object-cover" />
-                       <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
-                       <div className="absolute bottom-4 left-4 right-4 bg-white rounded-[16px] p-4 flex justify-between items-end shadow-lg">
-                          <div className="flex-1 mr-4 min-w-0">
-                              <h3 className="text-[16px] font-bold text-slate-900 mb-3 line-clamp-2 leading-snug">{qrModalRecord.title || '笔记分享'}</h3>
-                              <div className="flex items-center gap-2"><span className="text-[#ff2442] font-bold text-xs">小红书 App</span></div>
-                              <div className="text-[10px] text-slate-400 mt-1 scale-95 origin-left">长按扫码查看笔记</div>
-                          </div>
-                          <div className="w-16 h-16 shrink-0 bg-slate-50 border border-slate-100 rounded-lg p-1 flex items-center justify-center">
-                              {qrModalRecord.qrCodeUrl ? <img src={qrModalRecord.qrCodeUrl} className="w-full h-full object-contain mix-blend-multiply" /> : <QrCode size={24} className="text-slate-300"/>}
-                          </div>
-                       </div>
-                  </div>
-                  <div className="bg-transparent mt-4 flex flex-col gap-3">
-                      <button onClick={() => downloadQrImage(qrModalRecord.qrCodeUrl || '', `xhs-card-${qrModalRecord.title || 'share'}.png`)} className="w-full py-3.5 bg-[#ff2442] hover:bg-[#e01d3a] text-white rounded-full font-bold text-sm shadow-lg shadow-rose-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"><DownloadCloud size={18}/> 保存到相册</button>
-                      <button onClick={() => setQrModalRecord(null)} className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-full font-bold text-sm backdrop-blur-md border border-white/20 active:scale-95 transition-all">关闭</button>
-                  </div>
-              </div>
-          </div>
-      )}
+      </div>
+      
+      {/* Mobile Tab Bar */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 flex items-center justify-around z-50">
+          <button onClick={() => setActiveTab('libraries')} className={`flex flex-col items-center gap-1 ${activeTab === 'libraries' ? 'text-slate-900' : 'text-slate-400'}`}><Library size={20}/><span className="text-[10px] font-bold">资料库</span></button>
+          <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center gap-1 ${activeTab === 'chat' ? 'text-slate-900' : 'text-slate-400'}`}><MessageSquareText size={20}/><span className="text-[10px] font-bold">创作</span></button>
+          <button onClick={() => setActiveTab('preview')} className={`flex flex-col items-center gap-1 ${activeTab === 'preview' ? 'text-slate-900' : 'text-slate-400'}`}><MonitorPlay size={20}/><span className="text-[10px] font-bold">预览</span></button>
+      </div>
 
       {showTrainer && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4 animate-fade-in">
-             <div className="bg-white w-full h-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden relative flex flex-col">
-                 <button onClick={() => setShowTrainer(false)} className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 rounded-full z-50 transition-colors"><X size={20}/></button>
-                 <PersonaTrainer 
-                    initialSamples={trainerInitialSamples} 
-                    onPersonaLocked={() => {}} 
-                    onSaveToLibrary={() => {}}
-                    onAnalysisComplete={(p, source) => {
-                        setEditingPersona({
-                             ...p,
-                             category: 'AI训练',
-                             tags: ['AI提取'],
-                             sourceNoteId: 'trainer',
-                             avatar: user.avatar,
-                             description: '通过风格实验室提取'
-                        });
-                        setShowTrainer(false);
-                    }}
-                 />
-             </div>
-        </div>
+          <div className="fixed inset-0 z-[100] bg-white animate-fade-in flex flex-col">
+              <div className="h-14 border-b border-slate-100 flex items-center justify-center px-4 bg-white shrink-0 relative">
+                  <h3 className="font-bold text-slate-800">风格训练师</h3>
+                  <button onClick={() => setShowTrainer(false)} className="absolute right-4 p-2 hover:bg-slate-100 rounded-full"><X size={20}/></button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                  <PersonaTrainer 
+                      initialSamples={trainerInitialSamples}
+                      onPersonaLocked={() => {}} 
+                      onSaveToLibrary={() => {}}
+                      onAnalysisComplete={(persona, source) => {
+                          setEditingPersona({ ...persona, sourceNoteId: 'manual-training', category: '训练模型' });
+                          setShowTrainer(false);
+                          showToast("风格提取成功，请保存人设");
+                      }}
+                  />
+              </div>
+          </div>
       )}
     </div>
   );
 };
 
-export default memo(Workstation);
+export default Workstation;

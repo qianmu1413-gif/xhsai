@@ -32,25 +32,26 @@ export const getErrorMessage = (error: any): string => {
     }
 };
 
-// 默认配置 (敏感信息已移除，必须从数据库加载)
+// 默认配置 (敏感信息从环境变量加载，或者等待数据库配置)
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
-        apiKey: "", 
-        baseUrl: "https://api.vectorengine.ai", 
+        apiKey: process.env.API_KEY || "", 
+        // 允许通过环境变量配置中转地址，默认留空使用官方地址 (或 SDK 默认值)
+        baseUrl: process.env.GEMINI_BASE_URL || "", 
         model: "gemini-3-flash-preview" 
     },
     xhs: { 
-        apiKey: "", 
+        apiKey: process.env.XHS_API_KEY || "", 
         apiUrl: "https://xiaohongshu.day/api/v1/note" 
     },
     cos: { 
-        secretId: "", 
-        secretKey: "", 
-        bucket: "", 
-        region: "" 
+        secretId: process.env.COS_SECRET_ID || "", 
+        secretKey: process.env.COS_SECRET_KEY || "", 
+        bucket: process.env.COS_BUCKET || "", 
+        region: process.env.COS_REGION || "" 
     },
     publish: { 
-        apiKey: "",
+        apiKey: process.env.PUBLISH_API_KEY || "",
         targetUrl: "https://www.myaibot.vip/api/rednote/publish"
     }
 };
@@ -63,6 +64,8 @@ export const configRepo = {
             const { data } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
             if (data?.value) {
                 const loaded = data.value;
+                // 深度合并逻辑：数据库配置 > 环境变量/默认配置
+                // 注意：如果数据库中存了空字符串，会覆盖环境变量。通常这是预期的（用户显式清空）。
                 return {
                     gemini: { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) },
                     xhs: { ...DEFAULT_CONFIG.xhs, ...(loaded.xhs || {}) },
@@ -131,9 +134,7 @@ export const userRepo = {
         // 🟢 核心修复：只要 RPC 报错，无论什么错误码，都进行降级处理
         if (rpcError) {
              // 优化日志：只在开发环境或确实是异常时输出，避免恐慌
-             // 如果是 Function not found (PGRST202)，是预期的降级行为
              const isFunctionMissing = rpcError.code === 'PGRST202' || rpcError.message?.includes('function') || rpcError.message?.includes('found');
-             
              if (isFunctionMissing) {
                 console.log(`[Info] RPC Login function not found, switching to direct query fallback.`);
              } else {
@@ -141,7 +142,6 @@ export const userRepo = {
              }
              
              // 🟡 2. 降级方案: 直接查询 profiles 表
-             // 注意：请务必在 profiles 表的 username 和 password 字段上建立索引，否则此查询会很慢！
              const { data: directData, error: directError } = await supabase
                 .from('profiles')
                 .select('*')
@@ -254,7 +254,6 @@ export const userRepo = {
 
   deleteUser: async (userId: string): Promise<{success: boolean, message?: string}> => {
       if (!supabase) return { success: false, message: "数据库未连接" };
-      // 保护超级管理员不被删除
       if (userId === 'admin_user_001' || userId.startsWith('00000000')) return { success: false, message: "无法删除超级管理员" };
       try {
           const { data: current } = await supabase.from('profiles').select('data').eq('id', userId).single();
@@ -271,7 +270,6 @@ export const userRepo = {
   },
 };
 
-// --- FILE / LINK / PROJECT REPOS (Shortened for brevity but functional) ---
 export const fileRepo = {
     saveUpload: async (userId: string, fileRecord: Partial<UserUpload>) => {
         if (!supabase) return;
@@ -307,9 +305,6 @@ export const projectRepo = {
 
   saveProject: async (userId: string, project: Project): Promise<string | null> => {
     if (!supabase) return null;
-    
-    // 如果是临时ID (temp-开头)，则生成一个新的 UUID 作为数据库主键
-    // 如果是现有ID，则保持不变
     const isNew = project.id.startsWith('temp-');
     const finalId = isNew ? safeUUID() : project.id;
 
