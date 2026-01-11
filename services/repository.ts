@@ -57,8 +57,17 @@ const LOCAL_STORAGE_CONFIG_KEY = 'rednote_system_config_v1';
 export const configRepo = {
     getSystemConfig: async (): Promise<SystemConfig> => {
         let dbConfig: any = null;
+        let localConfig: any = null;
 
-        // 1. 优先尝试从 Supabase 获取
+        // 1. 获取 LocalStorage 配置 (作为最新编辑的备份)
+        try {
+            const localStr = localStorage.getItem(LOCAL_STORAGE_CONFIG_KEY);
+            if (localStr) {
+                localConfig = JSON.parse(localStr);
+            }
+        } catch (e) {}
+
+        // 2. 尝试从 Supabase 获取配置
         if (supabase) {
             try {
                 const { data, error } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
@@ -68,23 +77,22 @@ export const configRepo = {
             } catch (e) { console.warn("[Config] DB Error:", e); }
         }
 
-        // 2. 如果 DB 没数据，尝试从 LocalStorage 获取 (这是解决"测试行/运行不行"的关键兜底)
-        if (!dbConfig) {
-            try {
-                const localStr = localStorage.getItem(LOCAL_STORAGE_CONFIG_KEY);
-                if (localStr) {
-                    dbConfig = JSON.parse(localStr);
-                    console.log("[Config] Loaded from LocalStorage fallback");
-                }
-            } catch (e) {}
-        }
+        // 3. 智能合并策略 (Smart Merge)
+        // 优先级: DB > Local > Default
+        // 特殊情况: 如果 DB 存在但关键字段(Key/URL)为空，而 Local 有值，则优先使用 Local (解决 DB 同步失败或延迟问题)
+        
+        const baseGemini = dbConfig?.gemini || {};
+        const localGemini = localConfig?.gemini || {};
 
-        // 3. 合并配置 (DB/Local > Env Defaults)
-        // 注意：这里要做深度合并，防止部分字段缺失
-        const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(dbConfig?.gemini || {}) };
-        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}) };
-        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}) };
-        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(dbConfig?.cos || {}) };
+        const mergedGemini = {
+            apiKey: (baseGemini.apiKey || localGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim(),
+            baseUrl: (baseGemini.baseUrl || localGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim(),
+            model: (baseGemini.model || localGemini.model || DEFAULT_CONFIG.gemini.model || "").trim()
+        };
+
+        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(localConfig?.xhs || {}), ...(dbConfig?.xhs || {}) };
+        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(localConfig?.publish || {}), ...(dbConfig?.publish || {}) };
+        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(localConfig?.cos || {}), ...(dbConfig?.cos || {}) };
 
         return {
             gemini: mergedGemini,
@@ -95,17 +103,17 @@ export const configRepo = {
     },
 
     saveSystemConfig: async (config: SystemConfig) => {
-        // 1. 总是先保存到 LocalStorage，确保当前浏览器会话立即可用
+        // 1. 总是先保存到 LocalStorage
         try {
             localStorage.setItem(LOCAL_STORAGE_CONFIG_KEY, JSON.stringify(config));
         } catch (e) { console.error("LocalStorage Save Failed", e); }
 
         // 2. 尝试同步到 Supabase
-        if (!supabase) return; // 如果没连接DB，至少本地保存了
+        if (!supabase) return; 
         
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) {
-            // 如果表不存在，我们不抛出严重错误，因为 LocalStorage 已经保存成功了，用户可以继续使用
+            // 如果表不存在，仅警告
             if (error.code === '42P01') {
                 console.warn("Table 'app_config' missing. Config saved locally only.");
                 return;
