@@ -250,56 +250,12 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                         <ErrorDisplay error={msg.text} />
                     ) : (
                         <>
-                            {/* 🟢 Modified: Always render bulk notes grid if available */}
-                            {msg.bulkNotes && msg.bulkNotes.length > 0 && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 animate-fade-in">
-                                    {msg.bulkNotes.map((note, idx) => {
-                                        const titleLen = getLength(note.title);
-                                        const contentLen = getLength(note.content);
-                                        return (
-                                        <div key={idx} className="bg-white rounded-xl border border-slate-200 hover:border-rose-300 hover:shadow-lg transition-all flex flex-col overflow-hidden group/option relative ring-1 ring-transparent hover:ring-rose-100">
-                                            {/* Header with Stats */}
-                                            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-50 bg-slate-50/50">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-[10px] font-bold text-white bg-slate-400 px-1.5 py-0.5 rounded shadow-sm">方案 {idx+1}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    {/* 🟢 Modified: Title Count Text Color */}
-                                                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono font-bold ${titleLen > 20 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-black border-slate-100'}`} title="标题字数 (建议<20)">
-                                                        <span className="text-[8px] text-slate-400 scale-90 opacity-70">T</span> {titleLen}
-                                                    </div>
-                                                    {/* 🟢 Modified: Text black and bold as requested */}
-                                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded border bg-white border-slate-100 text-[9px] font-mono font-bold text-black" title="正文字数">
-                                                        <span className="text-[8px] text-slate-400 scale-90 opacity-70">C</span> {contentLen}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            {/* Content Preview */}
-                                            <div className="p-4 flex-1 flex flex-col gap-2">
-                                                <h4 className="font-bold text-sm text-slate-900 leading-snug line-clamp-2" title={cleanMarkdown(note.title)}>{cleanMarkdown(note.title)}</h4>
-                                                <div className="text-xs text-slate-500 leading-relaxed line-clamp-4 min-h-[4.5em]">{renderCardContent(note.content)}</div>
-                                            </div>
-
-                                            {/* Action Footer */}
-                                            <div className="p-3 pt-0 mt-auto">
-                                                <button onClick={() => onAdopt(note)} className="w-full py-2 bg-slate-50 hover:bg-rose-500 hover:text-white text-slate-600 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 group/btn border border-slate-100 hover:border-rose-500 hover:shadow-md">
-                                                    <ArrowUpRight size={14} className="text-slate-400 group-hover/btn:text-white transition-colors"/> 
-                                                    使用此方案 (填入编辑器)
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )})}
-                                </div>
-                            )}
-                            
-                            {/* Fallback for text only if no notes parsed */}
-                            {msg.text && (!msg.bulkNotes || msg.bulkNotes.length === 0) && (
+                            {/* ALWAYS RENDER TEXT BUBBLE */}
+                            {msg.text && (
                                 <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-6 hover:shadow-md transition-shadow relative group/card">
                                     <div className="prose prose-sm prose-slate max-w-none text-slate-700 leading-7">
                                         {renderFormattedText(msg.text)}
                                     </div>
-                                    {/* Stats Footer for Fallback */}
                                     <div className="mt-4 pt-3 border-t border-slate-50 flex justify-end items-center gap-3">
                                         <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
                                             <span>标题:</span> 
@@ -311,6 +267,49 @@ const ChatMessageItem = memo(({ msg, onAdopt }: { msg: ChatMessage, onAdopt: (n:
                                         </div>
                                     </div>
                                     <div className="absolute top-4 right-4 opacity-0 group-hover/card:opacity-100 transition-opacity"><CopyButton text={msg.text} /></div>
+                                </div>
+                            )}
+
+                            {/* RENDER CARDS IF AVAILABLE */}
+                            {msg.bulkNotes && msg.bulkNotes.length > 0 && (
+                                <div className="mt-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
+                                        {msg.bulkNotes.map((note, idx) => {
+                                            const titleLen = getLength(note.title);
+                                            const contentLen = getLength(note.content);
+                                            return (
+                                            <div key={idx} className="bg-white rounded-xl border border-slate-200 hover:border-rose-300 hover:shadow-lg transition-all flex flex-col overflow-hidden group/option relative ring-1 ring-transparent hover:ring-rose-100">
+                                                {/* Header with Stats */}
+                                                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-50 bg-slate-50/50">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] font-bold text-white bg-slate-400 px-1.5 py-0.5 rounded shadow-sm">方案 {idx+1}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-mono font-bold ${titleLen > 20 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-black border-slate-100'}`} title="标题字数 (建议<20)">
+                                                            <span className="text-[8px] text-slate-400 scale-90 opacity-70">T</span> {titleLen}
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded border bg-white border-slate-100 text-[9px] font-mono font-bold text-black" title="正文字数">
+                                                            <span className="text-[8px] text-slate-400 scale-90 opacity-70">C</span> {contentLen}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Content Preview */}
+                                                <div className="p-4 flex-1 flex flex-col gap-2">
+                                                    <h4 className="font-bold text-sm text-slate-900 leading-snug line-clamp-2" title={cleanMarkdown(note.title)}>{cleanMarkdown(note.title)}</h4>
+                                                    <div className="text-xs text-slate-500 leading-relaxed line-clamp-4 min-h-[4.5em]">{renderCardContent(note.content)}</div>
+                                                </div>
+
+                                                {/* Action Footer */}
+                                                <div className="p-3 pt-0 mt-auto">
+                                                    <button onClick={() => onAdopt(note)} className="w-full py-2 bg-slate-50 hover:bg-rose-500 hover:text-white text-slate-600 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 group/btn border border-slate-100 hover:border-rose-500 hover:shadow-md">
+                                                        <ArrowUpRight size={14} className="text-slate-400 group-hover/btn:text-white transition-colors"/> 
+                                                        使用此方案
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )})}
+                                    </div>
                                 </div>
                             )}
                         </>
