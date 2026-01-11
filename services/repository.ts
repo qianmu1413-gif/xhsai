@@ -92,8 +92,10 @@ export const configRepo = {
         }
 
         // 3. 深度合并逻辑：数据库配置 > 本地配置 > 默认配置
-        // 🟢 修正：确保数据库是最高优先级。如果数据库连接成功且有值，它将覆盖本地缓存。
-        // 这样如果用户在数据库手动改了Key，这里一定会生效。
+        // 🚨 修正优先级：确保 DB 配置覆盖本地配置。
+        // 之前的逻辑是 ...(dbConfig || {}), ...(localConfig || {}) 导致本地覆盖了云端。
+        // 现在改为 ...(localConfig || {}), ...(dbConfig || {}) 确保云端是最高优先级。
+        
         const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(localConfig?.gemini || {}), ...(dbConfig?.gemini || {}) };
         const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(localConfig?.xhs || {}), ...(dbConfig?.xhs || {}) };
         const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(localConfig?.publish || {}), ...(dbConfig?.publish || {}) };
