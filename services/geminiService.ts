@@ -4,9 +4,6 @@ import { configRepo } from "./repository";
 import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
 
-// 协议分隔符
-const DATA_MARKER = "###MATRIX_DATA_START###";
-
 // --- 文本清洗工具 ---
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
@@ -107,7 +104,7 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
     return "";
 };
 
-// 🟢 转换为 OpenAI 兼容格式的消息内容
+// 🟢 核心：转换为 OpenAI 兼容格式的消息内容
 const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
     try {
         let mimeType = file.mimeType || 'text/plain';
@@ -176,12 +173,20 @@ const callOpenAI = async (
 
     if (!apiKey) throw new Error("API Key 未配置");
     
-    // Normalize URL: Ensure no trailing slash, add /chat/completions
-    if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
-    if (!baseUrl.endsWith('/v1')) {
-         // Some users might forget /v1, but strict ones include it.
-         // Given the prompt explicitly said "https://api.vectorengine.ai/v1", we assume the user puts that in baseUrl.
+    // 强制纠错：如果 Key 是 sk- 开头，但 URL 包含了 googleapis.com，直接报错阻止
+    if (apiKey.startsWith('sk-') && baseUrl.includes('googleapis.com')) {
+        throw new Error("配置错误：您使用了第三方 Key (sk-...)，但 Base URL 却是 Google 官方地址。请在设置中将 Base URL 改为中转网关地址 (如 https://api.vectorengine.ai/v1)");
     }
+
+    // Normalize URL: Ensure no trailing slash
+    if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+    
+    // 🟢 强制补全 /v1 (如果用户漏填，且不是特殊的无版本网关)
+    // 许多用户会只填 https://api.vectorengine.ai，导致 404
+    if (!baseUrl.endsWith('/v1') && !baseUrl.endsWith('/v1beta')) {
+        baseUrl = `${baseUrl}/v1`;
+    }
+
     const endpoint = `${baseUrl}/chat/completions`;
 
     // 2. Request Body
@@ -192,7 +197,6 @@ const callOpenAI = async (
     };
     
     if (responseFormat) {
-        // Only add if explicitly requested (some models might strictly require it or not support it)
         body.response_format = responseFormat;
     }
 
@@ -201,14 +205,19 @@ const callOpenAI = async (
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'Authorization': `Bearer ${apiKey}` // OpenAI Standard
         },
         body: JSON.stringify(body)
     });
 
     if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`请求失败 (${response.status}): ${errText.substring(0, 200)}`);
+        let errMsg = `请求失败 (${response.status})`;
+        try {
+            const errJson = JSON.parse(errText);
+            if (errJson.error && errJson.error.message) errMsg = errJson.error.message;
+        } catch (e) {}
+        throw new Error(errMsg);
     }
 
     // 4. Handle Response
@@ -241,7 +250,7 @@ const callOpenAI = async (
                             onToken(content); // Pass Delta
                         }
                     } catch (e) {
-                        console.warn("Stream Parse Error:", e);
+                        // Ignore parse errors for keep-alive or malformed chunks
                     }
                 }
             }
@@ -255,7 +264,7 @@ const callOpenAI = async (
     }
 };
 
-// --- 业务函数 ---
+// --- 业务函数 (保持接口签名不变) ---
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件";
@@ -344,7 +353,9 @@ export const streamExpertGeneration = async (
 
     } catch (e: any) {
         let errorMsg = e.message || "未知错误";
-        if (errorMsg.includes('400')) errorMsg += "\n(请检查 Base URL 是否为 OpenAI 兼容格式，如 /v1)";
+        if (errorMsg.includes('400') || errorMsg.includes('API key')) {
+             errorMsg += "\n(💡 提示: 请检查 Base URL 是否正确，通常应以 /v1 结尾)";
+        }
         return { dialogueText: `生成出错: ${errorMsg}`, thought: "", notes: [] };
     }
 };
@@ -378,7 +389,8 @@ export const testConnection = async (inputConfig?: SystemConfig) => {
 
     } catch (e: any) {
         let msg = e.message || "未知错误";
-        if (msg.includes('404')) msg += "\n(请检查 Base URL 是否正确，需包含 /v1)";
+        if (msg.includes('404')) msg += "\n(💡 提示: 路径 404，请检查 Base URL 是否包含 /v1)";
+        if (msg.includes('400')) msg += "\n(💡 提示: 请求参数错误，请检查模型名称是否正确)";
         return { success: false, message: msg };
     }
 };

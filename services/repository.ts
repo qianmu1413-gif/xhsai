@@ -78,18 +78,25 @@ export const configRepo = {
             } catch (e) { console.warn("[Config] DB Error:", e); }
         }
 
-        // 3. 智能合并策略 (Smart Merge)
-        // 🟢 关键修改：优先级调整为 Local > DB > Default
-        // 解释：如果用户在 Admin 面板保存了新配置(Local)，但 DB 同步失败(旧数据)，必须优先使用 Local，否则会导致"测试成功但运行失败"的问题。
-        
         const baseGemini = dbConfig?.gemini || {};
         const localGemini = localConfig?.gemini || {};
 
-        const mergedGemini = {
-            apiKey: (localGemini.apiKey || baseGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim(),
-            baseUrl: (localGemini.baseUrl || baseGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim(),
-            model: (localGemini.model || baseGemini.model || DEFAULT_CONFIG.gemini.model || "").trim()
-        };
+        let apiKey = (localGemini.apiKey || baseGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim();
+        let baseUrl = (localGemini.baseUrl || baseGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim();
+        let model = (localGemini.model || baseGemini.model || DEFAULT_CONFIG.gemini.model || "").trim();
+
+        // 🚨 强制纠错逻辑：
+        // 如果用户使用的是 sk- 开头的 Key（第三方中转 Key），
+        // 但 Base URL 却是空的，或者是 Google 官方地址 (googleapis.com)，
+        // 则强制修正为 VectorEngine 地址。这能防止因为缓存了旧配置导致请求发往 Google 而报错。
+        if (apiKey.startsWith('sk-')) {
+            if (!baseUrl || baseUrl.includes('googleapis.com')) {
+                console.warn("Detected 'sk-' key with invalid/google base URL. Forcing update to VectorEngine.");
+                baseUrl = "https://api.vectorengine.ai/v1";
+            }
+        }
+
+        const mergedGemini = { apiKey, baseUrl, model };
 
         const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}), ...(localConfig?.xhs || {}) };
         const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}), ...(localConfig?.publish || {}) };
