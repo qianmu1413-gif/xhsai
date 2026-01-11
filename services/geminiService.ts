@@ -156,21 +156,41 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
         let mimeType = file.mimeType || 'text/plain';
         let base64Data = "";
         let blob: Blob | undefined = (file.file instanceof Blob) ? file.file : undefined;
+        let usedRemote = false;
 
-        if (blob) { 
-            mimeType = blob.type || mimeType; 
-        } 
-        else if (file.data.startsWith('http')) {
-            try { 
-                blob = await fetchUrlAsBlob(file.data); 
-                mimeType = blob.type || mimeType; 
-            } catch (fetchErr: any) { 
-                return { type: "text", text: `[系统错误: 无法下载文件 ${file.name} - ${fetchErr.message}。请让用户重新上传]` }; 
-            }
+        // 🟢 FIX: Ensure proper MIME type for PDFs
+        if (file.name.endsWith('.pdf') && (!mimeType || mimeType === 'application/octet-stream')) {
+            mimeType = 'application/pdf';
         }
-        else if (file.data.startsWith('data:')) {
-            const parts = file.data.split(',');
-            base64Data = parts[1];
+
+        // 🟢 FIX: Robust Blob Recovery Strategy
+        if (!blob) {
+            if (file.data.startsWith('http')) {
+                // 1. Remote URL -> Fetch Blob
+                try { 
+                    blob = await fetchUrlAsBlob(file.data); 
+                    mimeType = blob.type || mimeType; 
+                    usedRemote = true;
+                } catch (fetchErr: any) { 
+                    return { type: "text", text: `[系统错误: 无法下载文件 ${file.name} - ${fetchErr.message}。请让用户重新上传]` }; 
+                }
+            } else if (file.data.startsWith('data:')) {
+                // 2. Data URI -> Convert back to Blob
+                // This fixes the issue where loaded projects only have base64 string but no blob object
+                try {
+                    const res = await fetch(file.data);
+                    blob = await res.blob();
+                    
+                    // Also extract pure base64 for image usage later
+                    const parts = file.data.split(',');
+                    if (parts.length === 2) base64Data = parts[1];
+                } catch (e) {
+                    return { type: "text", text: `[系统错误: 本地缓存数据损坏 ${file.name}，请重新上传]` };
+                }
+            }
+        } else {
+            // If we already have a blob (e.g. fresh upload), we might need base64 later
+            // (Base64 generation is handled on demand below for images)
         }
 
         if (!blob && !base64Data) return { type: "text", text: `[文件数据丢失: ${file.name}]` };
@@ -178,8 +198,24 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
         // 1. PDF/DOCX (OpenAI Vision 不直接支持 PDF，转为纯文本)
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
             if (blob) {
-                const pdfText = await extractPdfText(blob);
+                let pdfText = await extractPdfText(blob);
                 
+                // 🟢 自动重试机制：如果解析失败且没试过远程，尝试从OSS重新下载
+                if (pdfText.startsWith('ERROR:') && !usedRemote && file.data.startsWith('http')) {
+                    try {
+                        console.log(`[GeminiService] PDF本地解析失败 (${pdfText})，尝试从 OSS 重新下载: ${file.name}`);
+                        const remoteBlob = await fetchUrlAsBlob(file.data);
+                        const remoteText = await extractPdfText(remoteBlob);
+                        if (!remoteText.startsWith('ERROR:')) {
+                            pdfText = remoteText;
+                        } else {
+                            console.warn(`[GeminiService] OSS 远程文件解析也失败了: ${remoteText}`);
+                        }
+                    } catch (retryErr) {
+                        console.warn("[GeminiService] OSS 重试下载失败:", retryErr);
+                    }
+                }
+
                 // 🟢 详细错误处理
                 if (pdfText.startsWith('ERROR:')) {
                     const code = pdfText.split(':')[1];
@@ -187,13 +223,14 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
                     if (code === 'PDF_SCANNED_OR_EMPTY') reason = "文件看起来是纯图片(扫描件)或无内容，无法直接提取文字";
                     if (code === 'PDF_PASSWORD_PROTECTED') reason = "文件被密码加密";
                     if (code === 'PDF_LIB_MISSING') reason = "PDF解析库未加载";
-                    return { type: "text", text: `[PDF解析失败: ${file.name}]\n原因: ${reason}` };
+                    if (code === 'PDF_LOAD_FAILED') reason = "文件数据流读取失败，可能已损坏";
+                    return { type: "text", text: `[PDF解析失败: ${file.name}]\n原因: ${reason}\n建议: 请尝试删除文件后重新上传` };
                 }
 
                 if (pdfText && pdfText.trim().length > 10) return { type: "text", text: `[PDF内容: ${file.name}]:\n${pdfText}` };
                 return { type: "text", text: `[PDF内容过短: ${file.name}]` };
             }
-            return { type: "text", text: `[PDF处理错误: ${file.name}]` };
+            return { type: "text", text: `[PDF处理错误: ${file.name} (数据流未重建)]` };
         } 
         else if (file.name.endsWith('.docx') && blob) {
             const docxText = await extractDocxText(blob);
@@ -204,6 +241,13 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
         else if (mimeType.startsWith('image/')) {
             let finalBase64 = base64Data;
             if (!finalBase64 && blob) finalBase64 = await blobToBase64(blob);
+            
+            // Fallback for data URI if not split yet
+            if (!finalBase64 && file.data.startsWith('data:')) {
+                 const parts = file.data.split(',');
+                 if (parts.length === 2) finalBase64 = parts[1];
+            }
+
             if (finalBase64) {
                  return {
                      type: "image_url",
