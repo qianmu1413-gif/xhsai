@@ -66,11 +66,12 @@ const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
         if (response.ok) return await response.blob();
     } catch (e) {}
     try {
+        // Fallback to proxy
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
         const res = await fetch(proxyUrl, { cache: 'no-store' });
         if (res.ok) return await res.blob();
     } catch (e) {}
-    throw new Error("无法下载文件 (网络或CORS限制)");
+    throw new Error("下载失败 (无法建立连接，请检查链接有效性或 CORS 配置)");
 };
 
 const extractDocxText = async (blob: Blob): Promise<string> => {
@@ -84,17 +85,33 @@ const extractDocxText = async (blob: Blob): Promise<string> => {
     return "";
 };
 
-// 🟢 确保 Worker 可以在任何地方被注入
-const ensurePdfWorker = () => {
+// 🟢 确保 Worker 可以在任何地方被注入，带重启逻辑
+const ensurePdfWorker = async () => {
     // @ts-ignore
-    if (typeof window !== 'undefined' && window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    if (typeof window !== 'undefined') {
         // @ts-ignore
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        if (!window.pdfjsLib) {
+            // Last resort: Try to reload script dynamically if missing
+            console.warn("PDF Lib missing, attempting hot reload...");
+            await new Promise((resolve) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                script.onload = resolve;
+                script.onerror = resolve;
+                document.head.appendChild(script);
+            });
+        }
+        
+        // @ts-ignore
+        if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+            // @ts-ignore
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
     }
 };
 
 const extractPdfText = async (blob: Blob): Promise<string> => {
-    ensurePdfWorker();
+    await ensurePdfWorker();
     try {
         // @ts-ignore
         if (typeof window !== 'undefined' && window.pdfjsLib) {
@@ -140,16 +157,23 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
         let base64Data = "";
         let blob: Blob | undefined = (file.file instanceof Blob) ? file.file : undefined;
 
-        if (blob) { mimeType = blob.type || mimeType; } 
+        if (blob) { 
+            mimeType = blob.type || mimeType; 
+        } 
         else if (file.data.startsWith('http')) {
-            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } catch (fetchErr: any) { return { type: "text", text: `[文件下载失败: ${file.name} - ${fetchErr.message}]` }; }
+            try { 
+                blob = await fetchUrlAsBlob(file.data); 
+                mimeType = blob.type || mimeType; 
+            } catch (fetchErr: any) { 
+                return { type: "text", text: `[系统错误: 无法下载文件 ${file.name} - ${fetchErr.message}。请让用户重新上传]` }; 
+            }
         }
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
             base64Data = parts[1];
         }
 
-        if (!blob && !base64Data) return { type: "text", text: `[文件数据读取失败: ${file.name}]` };
+        if (!blob && !base64Data) return { type: "text", text: `[文件数据丢失: ${file.name}]` };
 
         // 1. PDF/DOCX (OpenAI Vision 不直接支持 PDF，转为纯文本)
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
@@ -196,7 +220,7 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
 
         return { type: "text", text: `[未知类型: ${file.name}]` };
 
-    } catch (e: any) { return { type: "text", text: `[处理错误: ${file.name} - ${e.message}]` }; }
+    } catch (e: any) { return { type: "text", text: `[系统错误: ${file.name} - ${e.message}]` }; }
 };
 
 
@@ -366,7 +390,7 @@ export const streamExpertGeneration = async (
 ) => {
     // 🟢 严谨模式 (Strict Mode) 强化逻辑
     const strictInstruction = fidelity === FidelityMode.STRICT
-        ? "【IMPORTANT: STRICT MODE ACTIVE】\n1. You MUST strictly base your content ONLY on the provided context (Context) and files. \n2. Do NOT hallucinate. If the context is missing specific details (e.g., price, specs), do NOT invent them. State that they are missing or write generally.\n3. Do NOT add external facts that are not in the source materials.\n4. If the provided context is empty, please ask the user to provide materials instead of generating generic content."
+        ? "【IMPORTANT: STRICT MODE ACTIVE】\n1. You MUST strictly base your content ONLY on the provided context (Context) and files. \n2. Do NOT hallucinate. If the context is missing specific details (e.g., price, specs), do NOT invent them. State that they are missing or write generally.\n3. Do NOT add external facts that are not in the source materials.\n4. If the provided context is empty or file content failed to load (e.g. SYSTEM ERROR), please politely inform the user to check their uploaded files instead of making up a story."
         : "【Creative Mode】\nYou are allowed to expand creatively on the topic, using your knowledge of social media trends to enhance the content.";
 
     const systemText = `You are a professional Xiaohongshu (RedNote) content expert. Output in Chinese (Simplified). 

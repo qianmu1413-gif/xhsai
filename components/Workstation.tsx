@@ -472,7 +472,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   useEffect(() => { handleInputResize(); }, [currentInput]);
   
-  // 🟢 核心提速优化：项目列表加载策略
+  // 🟢 核心提速优化：项目列表加载策略 (修复：智能合并，防止丢失本地 Blob)
   useEffect(() => {
     const CACHE_KEY = `rednote_projects_cache_v2_${user.id}`;
 
@@ -483,7 +483,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
             if (cached) {
                 const parsed = JSON.parse(cached);
                 setProjects(parsed);
-                // 如果有缓存，不显示全屏 loading，让体验更丝滑
             }
         } catch (e) { console.error("Cache read error", e); }
 
@@ -492,14 +491,45 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
             const list = await projectRepo.listProjects(user.id);
             const activeProjects = list.filter(p => !p.isDeleted);
             
-            // 更新 State
-            setProjects(activeProjects);
+            // 🚨 CRITICAL FIX: Merge remote data with local 'File' objects (blobs)
+            // Background: Remote data only has URLs. If we just replace state, 
+            // any recently uploaded 'File' objects (which are not in DB) are lost.
+            // This forces the app to fetch the URL, which might fail due to CORS.
+            setProjects(prevProjects => {
+                // Create a map of existing local File objects
+                const localFilesMap = new Map<string, Record<string, File>>();
+                prevProjects.forEach(p => {
+                    if (p.attachedFiles) {
+                        p.attachedFiles.forEach(f => {
+                            if (f.file) {
+                                if (!localFilesMap.has(p.id)) localFilesMap.set(p.id, {});
+                                localFilesMap.get(p.id)![f.id] = f.file as File;
+                            }
+                        });
+                    }
+                });
+
+                // Merge these Files back into the fresh data from server
+                return activeProjects.map(remoteProj => {
+                    const localFiles = localFilesMap.get(remoteProj.id);
+                    if (!localFiles) return remoteProj;
+
+                    const mergedFiles = remoteProj.attachedFiles.map(rf => {
+                        // If we have a local File object for this attachment ID, use it
+                        if (localFiles[rf.id]) {
+                            return { ...rf, file: localFiles[rf.id] };
+                        }
+                        return rf;
+                    });
+                    
+                    return { ...remoteProj, attachedFiles: mergedFiles };
+                });
+            });
             
-            // 更新缓存
+            // Update Cache (store strict serializable data)
             localStorage.setItem(CACHE_KEY, JSON.stringify(activeProjects));
         } catch (e) {
             console.warn("Failed to fetch fresh projects", e);
-            // 网络错误时不覆盖缓存，保持展示旧数据
         }
     };
 
