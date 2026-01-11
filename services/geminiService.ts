@@ -442,6 +442,10 @@ export const streamExpertGeneration = async (
     ${personaPrompt || ''}
     
     ${strictInstruction}
+
+    CRITICAL RULES:
+    1. The title MUST be extremely concise and strictly under 20 Chinese characters. This is a hard limit.
+    2. Ensure the content flow is engaging.
     
     ${count > 1 ? 'Generate ' + count + ' distinct versions via ### 方案1 format.' : 'Generate 1 high-quality version.'}`;
 

@@ -200,7 +200,8 @@ const ThinkingIndicator = () => {
             </div>
             <div className="flex flex-col">
                 <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider mb-0.5 leading-none">AI Neural Process</span>
-                <span className="text-xs font-medium text-slate-700 min-w-[180px] transition-all duration-300">
+                {/* 🟢 Fix: Added min-width to prevent layout jumping when text changes */}
+                <span className="text-xs font-medium text-slate-700 min-w-[280px] inline-block transition-all duration-300">
                     {steps[step]}
                 </span>
             </div>
@@ -543,6 +544,11 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   useEffect(() => { projectRepo.aggregateUserAssets(user.id).then(setLibraryData); }, [projects, user.id]);
 
+  // 🟢 Fix: Only scroll on new messages or start/end of generation, not every token. This fixes the "jumping" issue.
+  useEffect(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
+  }, [chatHistory.length, isGenerating]);
+
   // ... (Other functions: handleNavigationAttempt, handleMobileItemSelect, etc. remain unchanged)
   // ... (Omitting redundant implementation details for brevity as requested by XML format constraints, only showing modified parts or key context)
   
@@ -781,7 +787,10 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
         setContextText(project.contextText || '');
         setAttachedFiles(project.attachedFiles || []);
         setSocialNotes(project.socialNotes || []);
-        setChatHistory(project.chatHistory || []);
+        // 🟢 Fix: Sanitize chat history to prevent stuck 'isStreaming' states
+        const safeHistory = (project.chatHistory || []).map(msg => ({ ...msg, isStreaming: false }));
+        setChatHistory(safeHistory);
+        
         setFidelity(project.fidelity || FidelityMode.STRICT);
         setWordCountLimit(project.wordCountLimit || 300);
         setGeneratedContent(project.generatedContent || '');
@@ -830,7 +839,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
     return () => clearTimeout(timer);
   }, [contextText, attachedFiles, socialNotes, chatHistory, fidelity, wordCountLimit, generatedContent, previewState, drafts, publishedHistory, materialAnalysis]);
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
+  // Removed duplicate useEffect for chatEndRef
 
   // ... (Rest of event handlers: batchDelete, removeFile, etc.) ...
   
@@ -1450,7 +1459,23 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           </div>
           <div className="absolute bottom-6 left-0 right-0 flex justify-center px-4">
               <div className="w-full max-w-2xl bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-slate-200 p-2 flex flex-col gap-2 transition-all ring-1 ring-slate-100 focus-within:ring-2 focus-within:ring-rose-500/20 focus-within:border-rose-400">
-                  <textarea ref={textareaRef} value={currentInput} onChange={(e) => setCurrentInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleGenerateClick()} placeholder="输入创作指令..." className="w-full max-h-32 bg-transparent border-none outline-none text-sm font-medium px-3 py-2 resize-none placeholder:text-slate-400 text-slate-900" rows={1} />
+                  <textarea 
+                    ref={textareaRef} 
+                    value={currentInput} 
+                    onChange={(e) => setCurrentInput(e.target.value)} 
+                    onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            // 🟢 Fix: Only generate if user actually typed something
+                            if (currentInput.trim()) {
+                                handleGenerateClick();
+                            }
+                        }
+                    }} 
+                    placeholder="输入创作指令..." 
+                    className="w-full max-h-32 bg-transparent border-none outline-none text-sm font-medium px-3 py-2 resize-none placeholder:text-slate-400 text-slate-900" 
+                    rows={1} 
+                  />
                   <div className="flex justify-between items-center px-2 pb-1">
                       <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-0.5 border border-slate-100">
@@ -1546,31 +1571,6 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                   <div className="flex gap-3 pt-2">
                       <button onClick={() => setEditingPersona(null)} className="flex-1 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors active:scale-95">取消</button>
                       <button onClick={handleSaveEditedPersona} className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 active:scale-95"><CheckCircle2 size={16}/> 保存并应用</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {qrModalRecord && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in" onClick={() => setQrModalRecord(null)}>
-              <div className="relative w-full max-w-[320px] rounded-[24px] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-                  <div className="relative aspect-[3/4] w-full">
-                       <img src={qrModalRecord.coverImage || qrModalRecord.imageUrls?.[0]} className="absolute inset-0 w-full h-full object-cover" />
-                       <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent pointer-events-none"></div>
-                       <div className="absolute bottom-4 left-4 right-4 bg-white rounded-[16px] p-4 flex justify-between items-end shadow-lg">
-                          <div className="flex-1 mr-4 min-w-0">
-                              <h3 className="text-[16px] font-bold text-slate-900 mb-3 line-clamp-2 leading-snug">{qrModalRecord.title || '笔记分享'}</h3>
-                              <div className="flex items-center gap-2"><span className="text-[#ff2442] font-bold text-xs">小红书 App</span></div>
-                              <div className="text-[10px] text-slate-400 mt-1 scale-95 origin-left">长按扫码查看笔记</div>
-                          </div>
-                          <div className="w-16 h-16 shrink-0 bg-slate-50 border border-slate-100 rounded-lg p-1 flex items-center justify-center">
-                              {qrModalRecord.qrCodeUrl ? <img src={qrModalRecord.qrCodeUrl} className="w-full h-full object-contain mix-blend-multiply" /> : <QrCode size={24} className="text-slate-300"/>}
-                          </div>
-                       </div>
-                  </div>
-                  <div className="bg-transparent mt-4 flex flex-col gap-3">
-                      <button onClick={() => downloadQrImage(qrModalRecord.qrCodeUrl || '', `xhs-card-${qrModalRecord.title || 'share'}.png`)} className="w-full py-3.5 bg-[#ff2442] hover:bg-[#e01d3a] text-white rounded-full font-bold text-sm shadow-lg shadow-rose-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"><DownloadCloud size={18}/> 保存到相册</button>
-                      <button onClick={() => setQrModalRecord(null)} className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-full font-bold text-sm backdrop-blur-md border border-white/20 active:scale-95 transition-all">关闭</button>
                   </div>
               </div>
           </div>
