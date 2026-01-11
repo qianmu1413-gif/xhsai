@@ -313,9 +313,10 @@ export const streamExpertGeneration = async (
         return { dialogueText: cleaned, thought: "", notes: parsedNotes };
     } catch (e: any) {
         let errorMsg = e.message;
-        // 捕获 Google 400 错误并翻译
-        if (errorMsg.includes('400') && (errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT'))) {
-            errorMsg = "❌ API Key 无效 (400)。\n请检查：您在使用 'sk-' Key，但请求被发往了 Google 官方服务器。\n解决方法：请进入【系统配置】，确保【Base URL】已填写并【保存成功】。";
+        // 捕获 400 错误
+        // 400 不一定只代表 Google 官方拒绝，也可能是第三方网关因为模型名错误、参数错误拒绝的。
+        if (errorMsg.includes('400')) {
+            errorMsg = "❌ 生成失败 (400 Bad Request)。\n可能原因：\n1. 请求发往了 Google 官方服务器 (Base URL 未生效)。\n2. 第三方网关拒绝了请求 (API Key 无效，或模型名称不支持)。\n\n请检查【系统配置】中的 Base URL 和 Model 字段。";
         }
         return { dialogueText: `生成出错: ${errorMsg}`, thought: "", notes: [] };
     }

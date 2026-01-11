@@ -78,21 +78,21 @@ export const configRepo = {
         }
 
         // 3. 智能合并策略 (Smart Merge)
-        // 优先级: DB > Local > Default
-        // 特殊情况: 如果 DB 存在但关键字段(Key/URL)为空，而 Local 有值，则优先使用 Local (解决 DB 同步失败或延迟问题)
+        // 🟢 关键修改：优先级调整为 Local > DB > Default
+        // 解释：如果用户在 Admin 面板保存了新配置(Local)，但 DB 同步失败(旧数据)，必须优先使用 Local，否则会导致"测试成功但运行失败"的问题。
         
         const baseGemini = dbConfig?.gemini || {};
         const localGemini = localConfig?.gemini || {};
 
         const mergedGemini = {
-            apiKey: (baseGemini.apiKey || localGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim(),
-            baseUrl: (baseGemini.baseUrl || localGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim(),
-            model: (baseGemini.model || localGemini.model || DEFAULT_CONFIG.gemini.model || "").trim()
+            apiKey: (localGemini.apiKey || baseGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim(),
+            baseUrl: (localGemini.baseUrl || baseGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim(),
+            model: (localGemini.model || baseGemini.model || DEFAULT_CONFIG.gemini.model || "").trim()
         };
 
-        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(localConfig?.xhs || {}), ...(dbConfig?.xhs || {}) };
-        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(localConfig?.publish || {}), ...(dbConfig?.publish || {}) };
-        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(localConfig?.cos || {}), ...(dbConfig?.cos || {}) };
+        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}), ...(localConfig?.xhs || {}) };
+        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}), ...(localConfig?.publish || {}) };
+        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(dbConfig?.cos || {}), ...(localConfig?.cos || {}) };
 
         return {
             gemini: mergedGemini,
