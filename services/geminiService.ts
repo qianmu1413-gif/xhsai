@@ -237,7 +237,9 @@ const getAIClient = async () => {
         baseUrl = undefined;
         console.log("%c[Gemini] Mode: DEFAULT GOOGLE API", "color: orange; font-weight: bold;");
     } else {
-        console.log(`%c[Gemini] Mode: CUSTOM GATEWAY (${baseUrl})`, "color: cyan; font-weight: bold;");
+        // Log masked key for debugging
+        const maskedKey = apiKey ? `${apiKey.substring(0,4)}...${apiKey.substring(apiKey.length-4)}` : 'EMPTY';
+        console.log(`%c[Gemini] Mode: CUSTOM GATEWAY (${baseUrl}) | Key: ${maskedKey}`, "color: cyan; font-weight: bold;");
     }
 
     if (!apiKey) {
