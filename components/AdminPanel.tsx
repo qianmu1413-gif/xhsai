@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, SystemConfig, Project } from '../types';
 import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon } from 'lucide-react';
@@ -118,11 +119,23 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
 
   const saveConfig = async () => {
       setIsSavingConfig(true);
-      await configRepo.saveSystemConfig(sysConfig);
-      setIsSavingConfig(false);
-      checkAI();
-      setShowConfigModal(false);
-      showToast("系统配置已更新");
+      try {
+          await configRepo.saveSystemConfig(sysConfig);
+          showToast("系统配置已更新");
+          checkAI();
+      } catch (e: any) {
+          // 即使云端保存失败，本地也已更新，所以仍可提示部分成功或具体错误
+          const msg = getErrorMessage(e);
+          if (msg.includes('本地')) {
+              showToast(msg, 'info'); // 降级提示
+              checkAI(); // 依然尝试检查连接，因为本地配置已生效
+          } else {
+              showToast(`配置保存异常: ${msg}`, 'error');
+          }
+      } finally {
+          setIsSavingConfig(false);
+          setShowConfigModal(false);
+      }
   };
 
   const generateRandomPassword = () => {

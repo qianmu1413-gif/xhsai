@@ -228,17 +228,20 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
 
 const getAIClient = async () => {
     const config = await configRepo.getSystemConfig();
-    const apiKey = config.gemini.apiKey || process.env.API_KEY;
-    // 获取配置中的 baseUrl，如果为空则设为 undefined 以便 SDK 使用其默认值 (generativelanguage.googleapis.com)
-    // 允许用户通过环境变量 GEMINI_BASE_URL 设置，这在 DEFAULT_CONFIG 中已经处理了
+    
+    // configRepo 已经处理了从 DB 或 LocalStorage 读取的逻辑
+    const apiKey = config.gemini.apiKey;
     let baseUrl = config.gemini.baseUrl;
     
     if (!baseUrl || baseUrl.trim() === "") {
         baseUrl = undefined;
+        console.debug("[Gemini] Using Default Google Endpoint");
+    } else {
+        console.debug(`[Gemini] Using Custom Gateway: ${baseUrl}`);
     }
 
     if (!apiKey) {
-        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key，或检查环境变量 API_KEY。");
+        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key。");
     }
 
     return new GoogleGenAI({ 

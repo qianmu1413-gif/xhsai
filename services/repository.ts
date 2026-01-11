@@ -32,26 +32,34 @@ export const getErrorMessage = (error: any): string => {
     }
 };
 
+// 🛡️ Safe Environment Variable Access (Prevents crash in browsers where process is undefined)
+const getEnv = (key: string) => {
+    try {
+        // @ts-ignore
+        return (typeof process !== 'undefined' && process.env) ? process.env[key] : "";
+    } catch { return ""; }
+};
+
 // 默认配置 (敏感信息从环境变量加载，或者等待数据库配置)
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
-        apiKey: process.env.API_KEY || "", 
+        apiKey: getEnv('API_KEY') || "", 
         // 允许通过环境变量配置中转地址，默认留空使用官方地址 (或 SDK 默认值)
-        baseUrl: process.env.GEMINI_BASE_URL || "", 
+        baseUrl: getEnv('GEMINI_BASE_URL') || "", 
         model: "gemini-3-flash-preview" 
     },
     xhs: { 
-        apiKey: process.env.XHS_API_KEY || "", 
+        apiKey: getEnv('XHS_API_KEY') || "", 
         apiUrl: "https://xiaohongshu.day/api/v1/note" 
     },
     cos: { 
-        secretId: process.env.COS_SECRET_ID || "", 
-        secretKey: process.env.COS_SECRET_KEY || "", 
-        bucket: process.env.COS_BUCKET || "", 
-        region: process.env.COS_REGION || "" 
+        secretId: getEnv('COS_SECRET_ID') || "", 
+        secretKey: getEnv('COS_SECRET_KEY') || "", 
+        bucket: getEnv('COS_BUCKET') || "", 
+        region: getEnv('COS_REGION') || "" 
     },
     publish: { 
-        apiKey: process.env.PUBLISH_API_KEY || "",
+        apiKey: getEnv('PUBLISH_API_KEY') || "",
         targetUrl: "https://www.myaibot.vip/api/rednote/publish"
     }
 };
@@ -59,28 +67,62 @@ const DEFAULT_CONFIG: SystemConfig = {
 // --- CONFIG REPOSITORY ---
 export const configRepo = {
     getSystemConfig: async (): Promise<SystemConfig> => {
-        if (!supabase) return DEFAULT_CONFIG;
-        try {
-            const { data } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
-            if (data?.value) {
-                const loaded = data.value;
-                // 深度合并逻辑：数据库配置 > 环境变量/默认配置
-                // 注意：如果数据库中存了空字符串，会覆盖环境变量。通常这是预期的（用户显式清空）。
-                return {
-                    gemini: { ...DEFAULT_CONFIG.gemini, ...(loaded.gemini || {}) },
-                    xhs: { ...DEFAULT_CONFIG.xhs, ...(loaded.xhs || {}) },
-                    publish: { ...DEFAULT_CONFIG.publish, ...(loaded.publish || {}) },
-                    cos: { ...DEFAULT_CONFIG.cos, ...(loaded.cos || {}) }
-                };
-            }
-        } catch (e) { console.error("Config Load Error", e); }
+        let dbConfig: any = null;
+
+        // 1. 优先尝试从云端数据库加载
+        if (supabase) {
+            try {
+                const { data, error } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
+                if (!error && data?.value) {
+                    dbConfig = data.value;
+                }
+            } catch (e) { console.warn("Cloud Config Load Warning:", e); }
+        }
+
+        // 2. 降级方案：如果云端没数据（或没连上），尝试从本地 LocalStorage 加载
+        // 这确保管理员在自己电脑上配置后，即使数据库表不存在也能使用自定义 API
+        if (!dbConfig && typeof localStorage !== 'undefined') {
+            try {
+                const local = localStorage.getItem('rednote_sys_config');
+                if (local) {
+                    dbConfig = JSON.parse(local);
+                    console.log("[Config] Loaded from LocalStorage fallback");
+                }
+            } catch(e) {}
+        }
+
+        // 3. 深度合并逻辑：加载的配置 > 默认环境变量配置
+        if (dbConfig) {
+            return {
+                gemini: { ...DEFAULT_CONFIG.gemini, ...(dbConfig.gemini || {}) },
+                xhs: { ...DEFAULT_CONFIG.xhs, ...(dbConfig.xhs || {}) },
+                publish: { ...DEFAULT_CONFIG.publish, ...(dbConfig.publish || {}) },
+                cos: { ...DEFAULT_CONFIG.cos, ...(dbConfig.cos || {}) }
+            };
+        }
+        
         return DEFAULT_CONFIG;
     },
 
     saveSystemConfig: async (config: SystemConfig) => {
-        if (!supabase) throw new Error("请先连接数据库");
+        // 1. 总是先保存到本地作为备份
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('rednote_sys_config', JSON.stringify(config));
+        }
+
+        // 2. 尝试保存到云端
+        if (!supabase) throw new Error("数据库未连接 (配置已保存至本地)");
+        
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
-        if (error) throw new Error(getErrorMessage(error));
+        
+        if (error) {
+            // 如果是表不存在的错误，给予友好提示，但不要阻断流程（因为本地已经保存了）
+            if (error.code === '42P01') { // PostgreSQL code for undefined_table
+                console.warn("Table 'app_config' missing. Configuration saved locally only.");
+                throw new Error("云端保存失败：缺少配置表。但配置已在本地生效，您可以继续使用。");
+            }
+            throw new Error(getErrorMessage(error));
+        }
     }
 };
 
@@ -128,17 +170,15 @@ export const userRepo = {
         let rawData = null;
 
         // 🟢 1. 优先尝试 RPC 登录 (这是最高效的方式)
-        // 如果这里报错 (RPC Login Failed)，说明数据库里没有 login_user 函数，会自动降级
         const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
         
         // 🟢 核心修复：只要 RPC 报错，无论什么错误码，都进行降级处理
         if (rpcError) {
-             // 优化日志：只在开发环境或确实是异常时输出，避免恐慌
              const isFunctionMissing = rpcError.code === 'PGRST202' || rpcError.message?.includes('function') || rpcError.message?.includes('found');
              if (isFunctionMissing) {
                 console.log(`[Info] RPC Login function not found, switching to direct query fallback.`);
              } else {
-                console.warn(`[Warn] RPC Login Failed (${rpcError.code || 'Unknown'}), switching to fallback. Error: ${getErrorMessage(rpcError)}`);
+                console.warn(`[Warn] RPC Login Failed (${rpcError.code || 'Unknown'}), switching to fallback.`);
              }
              
              // 🟡 2. 降级方案: 直接查询 profiles 表
