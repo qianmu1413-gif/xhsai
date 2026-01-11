@@ -1394,38 +1394,37 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           </div>
       </div>
 
-      {!isPreviewCollapsed && (
-          <div style={{ width: window.innerWidth >= 1024 ? rightPanelWidth : '100%' }} className={`flex-col bg-[#F8FAFC] z-20 transition-all border-l border-slate-200 relative ${activeTab === 'preview' ? 'flex w-full absolute inset-0' : 'hidden'} lg:flex lg:shrink-0 lg:static`}>
-              <div className="hidden lg:block absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-rose-500/50 z-50 transition-colors" onMouseDown={() => { isResizingRef.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }}></div>
-              <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 shrink-0 bg-[#F8FAFC]">
-                   <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">效果预览</span>
-                   <button onClick={() => setActiveTab('chat')} className="lg:hidden p-2 text-slate-400 active:scale-90"><X size={18} /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-8 flex justify-center items-start">
-                 <MobilePreview 
-                    content={generatedContent} 
-                    onContentChange={(c) => { setGeneratedContent(c); setHasUnsavedChanges(true); }}
-                    onCopy={() => { navigator.clipboard.writeText(generatedContent); showToast("已复制"); }} 
-                    drafts={drafts} 
-                    onDeleteDraft={deleteDraft} 
-                    onDeleteDraftBatch={handleBatchDeleteDrafts}
-                    images={previewState.images}
-                    onImagesChange={(imgs) => { setPreviewState(prev => ({ ...prev, images: imgs })); setHasUnsavedChanges(true); }}
-                    onSaveToLibrary={internalSaveToLibrary} 
-                    publishedHistory={publishedHistory} 
-                    onSavePublished={handlePublishSuccess} 
-                    onDeletePublished={deletePublishedRecord} 
-                    onDeletePublishedBatch={batchDeletePublishedRecords} 
-                    onFileUpload={handleMobileFileUpload} 
-                    user={user} 
-                    activeItemId={activeItemId}
-                    setActiveItemId={handleMobileItemSelect}
-                    onNewNote={handleCreateNewDraft}
-                 />
-              </div>
+      <div style={{ width: window.innerWidth >= 1024 ? rightPanelWidth : '100%' }} className={`flex-col bg-[#F8FAFC] z-20 transition-all border-l border-slate-200 relative ${activeTab === 'preview' ? 'flex w-full absolute inset-0' : 'hidden'} lg:flex lg:shrink-0 lg:static ${isPreviewCollapsed ? 'hidden' : ''}`}>
+          <div className="hidden lg:block absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-rose-500/50 z-50 transition-colors" onMouseDown={() => { isResizingRef.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }}></div>
+          <div className="h-14 flex items-center justify-between px-6 border-b border-slate-200 shrink-0 bg-[#F8FAFC]">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">效果预览</span>
+                <button onClick={() => setActiveTab('chat')} className="lg:hidden p-2 text-slate-400 active:scale-90"><X size={18} /></button>
           </div>
-      )}
-
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-8 flex justify-center items-start">
+              <MobilePreview 
+                content={generatedContent} 
+                onContentChange={(c) => { setGeneratedContent(c); setHasUnsavedChanges(true); }}
+                onCopy={() => { navigator.clipboard.writeText(generatedContent); showToast("已复制"); }} 
+                drafts={drafts} 
+                onDeleteDraft={deleteDraft} 
+                onDeleteDraftBatch={handleBatchDeleteDrafts}
+                images={previewState.images}
+                onImagesChange={(imgs) => { setPreviewState(prev => ({ ...prev, images: imgs })); setHasUnsavedChanges(true); }}
+                onSaveToLibrary={internalSaveToLibrary} 
+                publishedHistory={publishedHistory} 
+                onSavePublished={handlePublishSuccess} 
+                onDeletePublished={deletePublishedRecord} 
+                onDeletePublishedBatch={batchDeletePublishedRecords} 
+                onFileUpload={handleMobileFileUpload} 
+                user={user} 
+                activeItemId={activeItemId}
+                setActiveItemId={handleMobileItemSelect}
+                onNewNote={handleCreateNewDraft}
+              />
+          </div>
+      </div>
+      
+      {/* ... (Other modals kept exactly as they were) ... */}
       {selectedSocialNote && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedSocialNote(null)}>
                <div className="w-full max-w-5xl h-[85vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden" onClick={e => e.stopPropagation()}>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, SystemConfig, Project } from '../types';
-import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon } from 'lucide-react';
+import { Trash2, ShieldCheck, Layout, Save, Settings, Terminal, Plus, Key, Link2, Cpu, User as UserIcon, RefreshCcw, Eye, X, FileText, Database, Calendar, Loader2, Copy, CheckCircle, Globe, Send, Dice5, Edit, PauseCircle, PlayCircle, Image as ImageIcon, Sparkles, QrCode, AlertTriangle, Activity, Clock, MapPin, Zap, Lock, Skull, Ghost, Search, HardDrive, Users, Server, BarChart3, CloudLightning, LogOut, Link as LinkIcon, RotateCcw } from 'lucide-react';
 import { testConnection } from '../services/geminiService';
 import { userRepo, configRepo, projectRepo, getErrorMessage } from '../services/repository'; 
 import Toast, { ToastState } from './Toast';
@@ -49,14 +49,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   const [sysStatus, setSysStatus] = useState<{ loading: boolean; message: string; success?: boolean }>({ loading: false, message: '等待连接...', success: undefined });
   
   // Modal States
-  const [editForm, setEditForm] = useState({ username: '', password: '' });
-  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState<{show: boolean, message: string, action: () => void} | null>(null);
-
-  // Data Inspection (God Mode)
-  const [inspectingUser, setInspectingUser] = useState<string | null>(null);
-  const [userAssets, setUserAssets] = useState<{ personas: any[], assets: any[], finished: any[] }>({ personas: [], assets: [], finished: [] });
 
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   
@@ -71,14 +65,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
     const interval = setInterval(refreshUserList, 120000);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-      if (inspectingUser) {
-          projectRepo.aggregateUserAssets(inspectingUser, true).then(setUserAssets);
-      } else {
-          setUserAssets({ personas: [], assets: [], finished: [] });
-      }
-  }, [inspectingUser]);
 
   const loadConfig = async () => {
       const cfg = await configRepo.getSystemConfig();
@@ -145,6 +131,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
         if (res.success) {
             await refreshUserList(); 
             showToast(`账号创建成功: ${newUser.username}`);
+            // Fix: Keep the password visible for a moment or until the user clears it, 
+            // but the original logic cleared it. We'll show a persistent toast instead or just not clear it?
+            // Let's copy it to clipboard to be safe.
+            navigator.clipboard.writeText(`账号:${newUser.username}\n密码:${newUser.password}`);
+            showToast(`账号已创建，密码已复制到剪贴板`);
             setNewUser({ username: '', password: '' });
         } else {
             showToast(`创建失败: ${res.error}`, 'error');
@@ -180,6 +171,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
       } finally {
           setDeletingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
           setShowConfirmModal(null);
+      }
+  };
+
+  const executeRestoreUser = async (id: string, username: string) => {
+      showToast("正在执行复活程序...", 'info');
+      try {
+          const result = await userRepo.restoreUser(id);
+          if (result.success) {
+              await refreshUserList();
+              showToast(`用户 [${username}] 已恢复访问权限`);
+          } else {
+              showToast(`错误: ${result.message}`, 'error');
+          }
+      } catch (e: any) {
+           showToast(`错误: ${getErrorMessage(e)}`, 'error');
       }
   };
 
@@ -262,6 +268,101 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                        {isCreating ? <Loader2 size={12} className="animate-spin"/> : '创建账号'}
                    </button>
                </div>
+          </div>
+      </div>
+
+      {/* User Management Section - RESTORED */}
+      <div className="flex-1 flex flex-col min-h-0 relative z-10">
+          <div className="flex justify-between items-center mb-4">
+              <div className="flex gap-4">
+                  <button onClick={() => setViewMode('active')} className={`text-xs font-bold flex items-center gap-2 pb-2 border-b-2 transition-colors ${viewMode === 'active' ? 'text-indigo-400 border-indigo-500' : 'text-slate-500 border-transparent hover:text-slate-300'}`}>
+                      <Activity size={14}/> 活跃用户
+                  </button>
+                  <button onClick={() => setViewMode('graveyard')} className={`text-xs font-bold flex items-center gap-2 pb-2 border-b-2 transition-colors ${viewMode === 'graveyard' ? 'text-red-400 border-red-500' : 'text-slate-500 border-transparent hover:text-slate-300'}`}>
+                      <Skull size={14}/> 数据墓地
+                  </button>
+              </div>
+          </div>
+
+          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800 rounded-2xl overflow-hidden flex-1 shadow-2xl flex flex-col">
+              <div className="overflow-y-auto custom-scrollbar flex-1">
+                  <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-950/50 text-slate-500 font-medium text-xs sticky top-0 backdrop-blur-md z-10">
+                          <tr>
+                              <th className="px-6 py-4">用户标识</th>
+                              <th className="px-6 py-4">密钥/密码</th>
+                              <th className="px-6 py-4">状态</th>
+                              <th className="px-6 py-4">最后活动</th>
+                              <th className="px-6 py-4 text-right">操作</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                          {loadingUsers ? (
+                              <tr><td colSpan={5} className="text-center py-12 text-slate-500"><Loader2 size={24} className="animate-spin mx-auto mb-2"/>数据加载中...</td></tr>
+                          ) : displayUsers.length === 0 ? (
+                              <tr><td colSpan={5} className="text-center py-12 text-slate-600 italic">暂无数据</td></tr>
+                          ) : (
+                              displayUsers.map(u => (
+                                  <tr key={u.id} className="hover:bg-slate-800/30 transition-colors group">
+                                      <td className="px-6 py-4">
+                                          <div className="flex items-center gap-3">
+                                              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${u.role === UserRole.ADMIN ? 'bg-amber-500/10 text-amber-500' : 'bg-indigo-500/10 text-indigo-400'}`}>
+                                                  {u.role === UserRole.ADMIN ? <ShieldCheck size={14}/> : <UserIcon size={14}/>}
+                                              </div>
+                                              <div>
+                                                  <div className="font-bold text-slate-200">{u.username}</div>
+                                                  <div className="text-[10px] text-slate-500 font-mono">{u.id.substring(0,8)}...</div>
+                                              </div>
+                                          </div>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                          <div className="flex items-center gap-2 group/key">
+                                              <code className="bg-slate-950 px-2 py-1 rounded text-xs font-mono text-slate-400 group-hover:text-white transition-colors">{u.inviteCode}</code>
+                                              <button onClick={() => { navigator.clipboard.writeText(`账号:${u.username}\n密码:${u.inviteCode}`); showToast("账号信息已复制"); }} className="opacity-0 group-hover/key:opacity-100 text-slate-500 hover:text-white transition-opacity"><Copy size={12}/></button>
+                                          </div>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                          <div className="flex items-center gap-2">
+                                              {u.isSuspended ? (
+                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20"><PauseCircle size={10}/> 已停用</span>
+                                              ) : (
+                                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"><Activity size={10}/> 运行中</span>
+                                              )}
+                                              {u.totalOnlineSeconds > 3600 && <span className="text-[10px] text-indigo-400 font-medium">{formatDuration(u.totalOnlineSeconds)}</span>}
+                                          </div>
+                                      </td>
+                                      <td className="px-6 py-4">
+                                          <div className="text-xs text-slate-400">
+                                              {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('zh-CN', {month:'numeric', day:'numeric', hour:'numeric', minute:'numeric'}) : '从未登录'}
+                                          </div>
+                                          {u.location && <div className="text-[10px] text-slate-600 flex items-center gap-1 mt-0.5"><MapPin size={8}/> {u.location}</div>}
+                                      </td>
+                                      <td className="px-6 py-4 text-right">
+                                          <div className="flex justify-end gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
+                                              {u.role !== UserRole.ADMIN && !u.isDeleted && (
+                                                  <>
+                                                      <button onClick={() => onImpersonate(u)} className="p-1.5 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-400 rounded-lg transition-colors" title="控制台接管"><Ghost size={14}/></button>
+                                                      <button onClick={() => toggleSuspend(u)} className={`p-1.5 rounded-lg transition-colors ${u.isSuspended ? 'hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-400' : 'hover:bg-amber-500/20 text-slate-400 hover:text-amber-400'}`} title={u.isSuspended ? "启用" : "停用"}>
+                                                          {u.isSuspended ? <PlayCircle size={14}/> : <PauseCircle size={14}/>}
+                                                      </button>
+                                                      <button onClick={() => confirmAction(`确定要销毁用户 [${u.username}] 吗？数据将移至墓地。`, () => executeDeleteUser(u.id, u.username))} disabled={deletingIds.has(u.id)} className="p-1.5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg transition-colors" title="销毁">
+                                                          {deletingIds.has(u.id) ? <Loader2 size={14} className="animate-spin"/> : <Trash2 size={14}/>}
+                                                      </button>
+                                                  </>
+                                              )}
+                                              {u.isDeleted && (
+                                                  <button onClick={() => executeRestoreUser(u.id, u.username)} className="px-2.5 py-1.5 bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors" title="还原用户">
+                                                      <RotateCcw size={12}/> 还原
+                                                  </button>
+                                              )}
+                                          </div>
+                                      </td>
+                                  </tr>
+                              ))
+                          )}
+                      </tbody>
+                  </table>
+              </div>
           </div>
       </div>
 

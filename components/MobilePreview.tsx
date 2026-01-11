@@ -26,22 +26,27 @@ const getCharacterCount = (str: string) => {
 const loadImage = (url: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
         // 🛡️ Fix: Use document.createElement('img') to avoid conflict with Lucide 'Image' component
-        // 'new Image()' can sometimes trigger "Illegal constructor" if the global Image object is shadowed
         const img = document.createElement('img');
         img.crossOrigin = 'Anonymous'; 
+        
         img.onload = () => resolve(img);
+        
+        // 🛡️ CORS Proxy Fallback: If direct load fails (likely CORS), try proxy
         img.onerror = () => {
-            fetch(url)
-                .then(res => res.blob())
-                .then(blob => {
-                    const objUrl = URL.createObjectURL(blob);
-                    const fallbackImg = document.createElement('img');
-                    fallbackImg.onload = () => resolve(fallbackImg);
-                    fallbackImg.onerror = reject;
-                    fallbackImg.src = objUrl;
-                })
-                .catch(reject);
+             // Avoid infinite loop if proxy fails too
+             if (url.includes('corsproxy.io')) {
+                 reject(new Error("Failed to load image even with proxy"));
+                 return;
+             }
+             
+             const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+             const fallbackImg = document.createElement('img');
+             fallbackImg.crossOrigin = 'Anonymous';
+             fallbackImg.onload = () => resolve(fallbackImg);
+             fallbackImg.onerror = reject;
+             fallbackImg.src = proxyUrl;
         };
+
         img.src = url;
     });
 };

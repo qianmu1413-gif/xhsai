@@ -192,6 +192,14 @@ export const userRepo = {
           return { success: true, message: "用户已移除" };
       } catch (e) { return { success: false, message: getErrorMessage(e) }; }
   },
+  restoreUser: async (userId: string): Promise<{success: boolean, message?: string}> => {
+      if (!supabase) return { success: false, message: "数据库未连接" };
+      try {
+          const { data: current } = await supabase.from('profiles').select('data').eq('id', userId).single();
+          await supabase.from('profiles').update({ data: { ...(current?.data || {}), isDeleted: false } }).eq('id', userId);
+          return { success: true, message: "用户已还原" };
+      } catch (e) { return { success: false, message: getErrorMessage(e) }; }
+  },
   updateQuota: async (userId: string, newQuota: number) => {
       if (!supabase) return;
       await supabase.from('profiles').update({ quota_remaining: newQuota }).eq('id', userId);

@@ -147,10 +147,7 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e) { return { text: `[错误]` }; }
 };
 
-// 🟢 终极修复：自定义请求拦截器 (The "Surgical" Fetch)
-// 1. 强制清理 URL 参数中的 key
-// 2. 强制使用 Bearer Token
-// 3. 自动修复路径版本重复 (v1/v1beta)
+// 🟢 修复后的拦截器：仅针对 sk- Key 做处理
 const createCustomFetch = (apiKey: string) => {
     return async (url: RequestInfo | URL, init?: RequestInit) => {
         let fetchUrlStr = url.toString();
@@ -160,31 +157,41 @@ const createCustomFetch = (apiKey: string) => {
         const isSkKey = apiKey.startsWith('sk-');
 
         if (isSkKey) {
-            // A. 清除 URL 参数
+            // 1. 清除 URL 参数中的 key (这是导致 400 Invalid Key 的核心原因)
             const urlObj = new URL(fetchUrlStr);
-            urlObj.searchParams.delete('key'); 
-            fetchUrlStr = urlObj.toString();
-
-            // B. 路径修正：如果 BaseURL 包含 /v1 且 SDK 加了 /v1beta，则替换为 /v1
-            if (fetchUrlStr.includes('/v1/v1beta/')) {
-                fetchUrlStr = fetchUrlStr.replace('/v1/v1beta/', '/v1/');
+            if (urlObj.searchParams.has('key')) {
+                urlObj.searchParams.delete('key');
+                fetchUrlStr = urlObj.toString();
             }
-            // 某些网关可能不需要 v1beta，直接是 /models
-            // 如果你发现还是 404，可以尝试取消下面这行的注释
-            // fetchUrlStr = fetchUrlStr.replace('/v1beta/', '/v1/');
 
-            // C. Header 重构
+            // 2. 重构 Headers
             const headers = new Headers(fetchInit.headers || {});
-            headers.delete('x-goog-api-key'); // 移除 Google 头
-            headers.set('Authorization', `Bearer ${apiKey}`); // 注入 Bearer
-            headers.set('Content-Type', 'application/json'); // 确保类型
+            
+            // 移除 Google 专用头，避免网关混淆
+            if (headers.has('x-goog-api-key')) {
+                headers.delete('x-goog-api-key');
+            }
+            
+            // 注入 OpenAI 风格的鉴权
+            headers.set('Authorization', `Bearer ${apiKey}`);
+            headers.set('Content-Type', 'application/json');
 
             fetchInit.headers = headers;
         }
 
-        // console.log(`[Gemini Request] ${fetchInit.method} ${fetchUrlStr}`);
         return fetch(fetchUrlStr, fetchInit);
     };
+};
+
+// 🟢 Base URL 清洗工具
+const cleanBaseUrl = (url: string | undefined): string | undefined => {
+    if (!url || !url.trim()) return undefined;
+    let clean = url.trim();
+    
+    // 仅移除末尾斜杠，保留用户输入的所有路径信息
+    if (clean.endsWith('/')) clean = clean.slice(0, -1);
+    
+    return clean;
 };
 
 const getAIClient = async (overrideConfig?: SystemConfig) => {
@@ -194,7 +201,7 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
     if (overrideConfig) {
         apiKey = overrideConfig.gemini.apiKey;
         baseUrl = overrideConfig.gemini.baseUrl;
-        console.log(`[Gemini] Test Mode: Key=${apiKey?.substring(0,4)}... URL=${baseUrl}`);
+        console.log(`[Gemini] Test Mode: Key=${apiKey?.substring(0,4)}...`);
     } else {
         const config = await configRepo.getSystemConfig();
         apiKey = config.gemini.apiKey;
@@ -203,23 +210,25 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
     
     if (!apiKey) throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
 
-    let finalBaseUrl = (baseUrl && baseUrl.trim() !== "") ? baseUrl.trim() : undefined;
-    if (finalBaseUrl && finalBaseUrl.endsWith('/')) finalBaseUrl = finalBaseUrl.slice(0, -1);
+    // 使用清洗后的 BaseURL
+    const finalBaseUrl = cleanBaseUrl(baseUrl);
 
     return new GoogleGenAI({ 
         apiKey: apiKey,
         baseUrl: finalBaseUrl,
-        fetch: createCustomFetch(apiKey) // 注入拦截器
+        fetch: createCustomFetch(apiKey) // 注入稳健的拦截器
     });
 };
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件";
     try {
-        const ai = await getAIClient();
+        const config = await configRepo.getSystemConfig();
+        const ai = await getAIClient(config);
         const fileParts = await Promise.all(files.map(prepareFilePart));
+        // 🟢 动态使用配置中的模型，不再硬编码
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: config.gemini.model || 'gemini-3-pro-preview',
             contents: { parts: [{ text: "分析素材卖点" }, ...fileParts] },
         });
         return cleanText(response.text || "分析失败");
@@ -264,10 +273,12 @@ export const streamExpertGeneration = async (
 ) => {
     const systemText = `You are a content expert. Output in Chinese. ${personaPrompt || ''} ${count > 1 ? 'Generate ' + count + ' versions via ### 方案1 format.' : 'Generate 1 version.'}`;
     try {
-        const ai = await getAIClient(); 
+        const config = await configRepo.getSystemConfig();
+        const ai = await getAIClient(config); 
         const fileParts = await Promise.all(files.map(prepareFilePart));
+        // 🟢 动态使用配置中的模型
         const response = await ai.models.generateContentStream({
-            model: 'gemini-3-pro-preview',
+            model: config.gemini.model || 'gemini-3-pro-preview',
             contents: { parts: [{ text: context }, ...fileParts] },
             config: { systemInstruction: systemText, temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85 }
         });
@@ -289,9 +300,11 @@ export const streamExpertGeneration = async (
 
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
-        const ai = await getAIClient();
+        const config = await configRepo.getSystemConfig();
+        const ai = await getAIClient(config);
+        // 🟢 动态使用配置中的模型
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: config.gemini.model || 'gemini-3-pro-preview',
             contents: `Analyze persona: ${samples}`,
             config: {
                 systemInstruction: ANALYSIS_SYSTEM_PROMPT,
@@ -319,25 +332,27 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 export const testConnection = async (inputConfig?: SystemConfig) => {
     try {
         const ai = await getAIClient(inputConfig);
+        // 使用用户指定的模型进行测试，而不是写死
         const modelName = inputConfig?.gemini?.model || 'gemini-3-flash-preview';
 
+        // 🟢 修复：移除 thinkingConfig，因为非 Gemini-3 模型不支持此参数，会导致 400 错误
         const response = await ai.models.generateContent({
             model: modelName,
             contents: 'ping',
-            config: { thinkingConfig: { thinkingBudget: 0 } }
+            // config: { thinkingConfig: { thinkingBudget: 0 } } // 已移除
         });
         
-        return { success: !!response.text, message: response.text ? `✅ 连接成功: ${response.text.substring(0, 10)}...` : "❌ 收到空响应" };
+        return { success: !!response.text, message: response.text ? `✅ 连接成功` : "❌ 收到空响应" };
 
     } catch (e: any) {
         let msg = e.message || "未知错误";
         // 智能错误诊断
         if (msg.includes('400') || msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
-            msg = `[400 认证失败] Key 无效。\n系统已自动注入 Bearer Token 并清除 URL 参数。\n请检查 Key 是否正确，或网关是否支持 Gemini 协议。`;
+            msg = `[400 认证失败] Key 或参数无效。\n如果使用非 Gemini 3 模型，系统已移除 Thinking 参数以兼容旧模型。\n请检查 Key 正确性及网关兼容性。`;
         } else if (msg.includes('404')) {
-            msg = `[404 路径错误] 模型或路径不存在。\n系统已自动修正 /v1/v1beta 路径。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
+            msg = `[404 路径错误] 模型未找到。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
         } else if (msg.includes('Failed to fetch')) {
-            msg = `[网络错误] 无法连接到服务器。\n请检查 Base URL (${inputConfig?.gemini?.baseUrl}) 是否正确 (CORS/网络)。`;
+            msg = `[网络错误] 无法连接到服务器。\n请检查 Base URL 是否正确 (是否需要跨域/CORS 支持?)。`;
         }
         return { success: false, message: msg };
     }
