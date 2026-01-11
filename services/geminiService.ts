@@ -163,7 +163,7 @@ const createCustomFetch = (apiKey: string) => {
             urlStr = String(input);
         }
 
-        const isSkKey = apiKey.startsWith('sk-');
+        const isSkKey = apiKey.trim().startsWith('sk-');
 
         if (isSkKey) {
             // 1. 清洗 URL (移除 key 参数)
@@ -177,8 +177,8 @@ const createCustomFetch = (apiKey: string) => {
 
             // 2. 注入 Header
             const headers = new Headers(finalInit.headers || {});
-            headers.set('Authorization', `Bearer ${apiKey}`);
-            headers.set('x-goog-api-key', apiKey);
+            headers.set('Authorization', `Bearer ${apiKey.trim()}`);
+            headers.set('x-goog-api-key', apiKey.trim());
             headers.set('Content-Type', 'application/json');
 
             finalInit = { ...finalInit, headers };
@@ -212,14 +212,15 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
         baseUrl = config.gemini.baseUrl;
     }
     
+    // 安全去空格
+    apiKey = (apiKey || '').trim();
+    baseUrl = (baseUrl || '').trim();
+    
     if (!apiKey) throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
 
-    // 🔴 强制熔断检查：这是解决问题的关键
-    // 如果是 sk- Key，且 Base URL 为空，直接报错，不让 SDK 默认连 Google。
-    // SDK 内部逻辑是：如果没有提供 baseUrl，就用 googleapis.com。
-    // 这就是为什么您 "没填 Base URL" 或者 "没保存成功" 时会报 400。
+    // 🔴 强制熔断检查
     if (apiKey.startsWith('sk-')) {
-        if (!baseUrl || !baseUrl.trim()) {
+        if (!baseUrl) {
             throw new Error("❌ 配置缺失：检测到 'sk-' 开头的 Key，但【Base URL】为空。\n\n请在设置中填写您的第三方网关地址（例如 https://api.openai-proxy.com/v1/gemini），并点击保存。");
         }
         if (baseUrl.includes('googleapis.com')) {
@@ -231,8 +232,6 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
 
     return new GoogleGenAI({ 
         apiKey: apiKey,
-        // 如果 finalBaseUrl 有值，SDK 会用它；如果是 undefined，SDK 用官方地址。
-        // 上面的熔断检查确保了如果是 sk- Key，这里一定有值。
         ...(finalBaseUrl ? { baseUrl: finalBaseUrl } : {}),
         fetch: createCustomFetch(apiKey) 
     });
