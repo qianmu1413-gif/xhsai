@@ -418,6 +418,104 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
     };
   }, []);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files?.length) return;
+      setIsUploadingFile(true);
+      showToast("文件正在上传中，请稍后...", "info");
+      const newFiles: AttachedFile[] = [];
+      let successCount = 0;
+      for (let i = 0; i < e.target.files.length; i++) {
+          const file = e.target.files[i];
+          try {
+              const url = await uploadToCOS(file);
+              const isImage = file.type.startsWith('image/');
+              newFiles.push({
+                  id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                  name: file.name,
+                  type: isImage ? 'image' : 'file',
+                  mimeType: file.type,
+                  data: url,
+                  isUrl: true,
+                  file: file
+              });
+              successCount++;
+          } catch (err) { showToast(`上传失败: ${file.name}`, 'error'); }
+      }
+      setAttachedFiles(prev => [...prev, ...newFiles]);
+      setIsUploadingFile(false);
+      if (successCount > 0) showToast(`成功上传 ${successCount} 个文件`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleMobileFileUpload = async (files: File[]): Promise<string[]> => {
+        const urls: string[] = [];
+        for (const file of files) {
+            try { const url = await uploadToCOS(file); urls.push(url); } 
+            catch (e) { console.error(e); }
+        }
+        return urls;
+  };
+
+  const handleAnalyzeMaterials = async () => {
+      if (attachedFiles.length === 0) return;
+      if (isAnalysingFile) return;
+      setIsAnalysingFile(true);
+      showToast(`正在综合分析 ${attachedFiles.length} 份资料...`, "info");
+      try {
+          const result = await analyzeMaterials(attachedFiles);
+          setMaterialAnalysis(result);
+          setShowAnalysisArea(true);
+          showToast("资料分析已完成，结果已保存");
+      } catch (e: any) { showToast(`分析失败: ${getErrorMessage(e)}`, 'error'); } 
+      finally { setIsAnalysingFile(false); }
+  };
+
+  useEffect(() => { handleInputResize(); }, [currentInput]);
+  
+  // 🟢 核心提速优化：项目列表加载策略
+  useEffect(() => {
+    const CACHE_KEY = `rednote_projects_cache_v2_${user.id}`;
+
+    const loadProjects = async () => {
+        // 1. 立即加载本地缓存 (Stale First)
+        try {
+            const cached = localStorage.getItem(CACHE_KEY);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                setProjects(parsed);
+                // 如果有缓存，不显示全屏 loading，让体验更丝滑
+            }
+        } catch (e) { console.error("Cache read error", e); }
+
+        // 2. 后台静默更新 (Revalidate in Background)
+        try {
+            const list = await projectRepo.listProjects(user.id);
+            const activeProjects = list.filter(p => !p.isDeleted);
+            
+            // 更新 State
+            setProjects(activeProjects);
+            
+            // 更新缓存
+            localStorage.setItem(CACHE_KEY, JSON.stringify(activeProjects));
+        } catch (e) {
+            console.warn("Failed to fetch fresh projects", e);
+            // 网络错误时不覆盖缓存，保持展示旧数据
+        }
+    };
+
+    loadProjects();
+
+    try {
+        const savedPersonas = localStorage.getItem(`rednote_personas_${user.id}`);
+        if (savedPersonas) setGlobalPersonas(JSON.parse(savedPersonas)); 
+    } catch (e) { console.error(e); }
+  }, [user.id]);
+
+  useEffect(() => { projectRepo.aggregateUserAssets(user.id).then(setLibraryData); }, [projects, user.id]);
+
+  // ... (Other functions: handleNavigationAttempt, handleMobileItemSelect, etc. remain unchanged)
+  // ... (Omitting redundant implementation details for brevity as requested by XML format constraints, only showing modified parts or key context)
+  
   const handleNavigationAttempt = (action: () => void) => {
       if (hasUnsavedChanges) {
           setUnsavedNavModal({ show: true, action });
@@ -455,13 +553,15 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           showToast("已新建空白笔记 (随机配图)");
       });
   };
-
+  
   const handlePublishSuccess = (record: PublishedRecord) => {
       savePublishedRecord(record);
       setHasUnsavedChanges(false);
       setActiveItemId(record.id);
   };
-
+  
+  // ... (internalSaveToLibrary, saveAndNavigate, etc.) ...
+  
   const internalSaveToLibrary = async (t: string, c: string, type: 'prompt' | 'note', existingId?: string, folder?: string) => {
       if (!c.trim() && !t.trim()) {
           showToast("内容为空，无法保存", "error");
@@ -641,73 +741,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`;
       }
   };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (!e.target.files?.length) return;
-      setIsUploadingFile(true);
-      showToast("文件正在上传中，请稍后...", "info");
-      const newFiles: AttachedFile[] = [];
-      let successCount = 0;
-      for (let i = 0; i < e.target.files.length; i++) {
-          const file = e.target.files[i];
-          try {
-              const url = await uploadToCOS(file);
-              const isImage = file.type.startsWith('image/');
-              newFiles.push({
-                  id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-                  name: file.name,
-                  type: isImage ? 'image' : 'file',
-                  mimeType: file.type,
-                  data: url,
-                  isUrl: true,
-                  file: file
-              });
-              successCount++;
-          } catch (err) { showToast(`上传失败: ${file.name}`, 'error'); }
-      }
-      setAttachedFiles(prev => [...prev, ...newFiles]);
-      setIsUploadingFile(false);
-      if (successCount > 0) showToast(`成功上传 ${successCount} 个文件`);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleMobileFileUpload = async (files: File[]): Promise<string[]> => {
-        const urls: string[] = [];
-        for (const file of files) {
-            try { const url = await uploadToCOS(file); urls.push(url); } 
-            catch (e) { console.error(e); }
-        }
-        return urls;
-  };
-
-  const handleAnalyzeMaterials = async () => {
-      if (attachedFiles.length === 0) return;
-      if (isAnalysingFile) return;
-      setIsAnalysingFile(true);
-      showToast(`正在综合分析 ${attachedFiles.length} 份资料...`, "info");
-      try {
-          const result = await analyzeMaterials(attachedFiles);
-          setMaterialAnalysis(result);
-          setShowAnalysisArea(true);
-          showToast("资料分析已完成，结果已保存");
-      } catch (e: any) { showToast(`分析失败: ${getErrorMessage(e)}`, 'error'); } 
-      finally { setIsAnalysingFile(false); }
-  };
-
-  useEffect(() => { handleInputResize(); }, [currentInput]);
-  useEffect(() => {
-    const loadProjects = async () => {
-        const list = await projectRepo.listProjects(user.id);
-        setProjects(list.filter(p => !p.isDeleted));
-    };
-    loadProjects();
-    try {
-        const savedPersonas = localStorage.getItem(`rednote_personas_${user.id}`);
-        if (savedPersonas) setGlobalPersonas(JSON.parse(savedPersonas)); 
-    } catch (e) { console.error(e); }
-  }, [user.id]);
-
-  useEffect(() => { projectRepo.aggregateUserAssets(user.id).then(setLibraryData); }, [projects, user.id]);
+  
+  // ... (Other useEffects for saveState, scrollIntoView) ...
 
   useEffect(() => {
     if (!currentProjectId) { setViewMode('dashboard'); return; }
@@ -767,6 +802,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
 
+  // ... (Rest of event handlers: batchDelete, removeFile, etc.) ...
+  
   const handleBatchDeleteDrafts = (ids: string[]) => {
       const idSet = new Set(ids.map(String));
       setDrafts(prev => prev.filter(d => !idSet.has(String(d.id))));
@@ -794,6 +831,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       } else if (failCount > 0) { showToast("提取失败，请检查链接是否有效", "error"); }
       setIsBatchExtracting(false);
   };
+  
+  // ... (Other methods: removeSocialNote, removeFile, deleteDraft, etc.) ...
 
   const toggleMaterialSelection = (e: React.MouseEvent, noteId: string) => {
       e.stopPropagation();
@@ -855,6 +894,8 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
           setConfirmModal(null);
       });
   };
+
+  // ... (handleBatchPersonaAnalysis, handleDirectAnalysis) ...
 
   const handleBatchPersonaAnalysis = async () => {
       if (selectedMaterialIds.size === 0) return;
@@ -1016,6 +1057,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
       }).length;
   };
 
+  // ... (View mode switching: dashboard vs workspace, same as original but using updated state) ...
   if (viewMode === 'dashboard') {
      return (
         <div className="h-screen bg-[#F0F2F5] flex flex-col relative font-sans text-slate-800 overflow-hidden">
@@ -1084,6 +1126,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
      );
   }
 
+  // ... (Workstation main return, same as before) ...
   return (
     <div className="flex h-screen w-screen bg-[#F8FAFC] overflow-hidden font-sans text-slate-900">
       {toast.show && <Toast message={toast.message} type={toast.type} onClose={() => setToast({...toast, show: false})} />}
@@ -1119,12 +1162,15 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
               </div>
           </div>
       )}
-
+      
+      {/* ... Left Panel, Chat Panel, Right Panel code ... (Same as original, ensuring structure is maintained) */}
       <div className={`flex-col bg-[#F8FAFC] border-r border-slate-200 z-30 transition-all duration-300 ${activeTab === 'libraries' ? 'flex w-full absolute inset-0 bg-[#F8FAFC]' : 'hidden'} lg:flex lg:w-[320px] lg:static lg:shrink-0`}>
+         {/* ... (Left Sidebar Content) ... */}
          <div className="h-14 flex items-center px-5 border-b border-slate-200 shrink-0 bg-white">
              <button onClick={() => handleNavigationAttempt(() => setCurrentProjectId(null))} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors mr-3 active:scale-90"><ArrowLeft size={16} /></button>
              <span className="font-bold text-sm truncate flex-1 text-slate-800">{projects.find(p => p.id === currentProjectId)?.name}</span>
          </div>
+         {/* ... Rest of Sidebar ... */}
          <div className="flex bg-white border-b border-slate-200 px-2 pt-2">
              {['design', 'assets', 'history'].map(t => (
                  <button key={t} onClick={() => setActiveLeftTab(t as any)} className={`flex-1 pb-2 text-[11px] font-bold border-b-2 transition-all active:opacity-70 ${activeLeftTab === t ? 'border-rose-500 text-rose-600' : 'border-transparent text-slate-400'}`}>
@@ -1133,9 +1179,11 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
              ))}
          </div>
          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
-             {activeLeftTab === 'design' && (
-                 <>
-                     <section className="space-y-3 relative z-50">
+            {/* ... Sidebar Panels Implementation ... */}
+            {activeLeftTab === 'design' && (
+                <>
+                  {/* ... Design Panel ... */}
+                   <section className="space-y-3 relative z-50">
                          <div className="flex justify-between items-center">
                             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><UserIcon size={12}/> 当前人设</h3>
                             <button onClick={() => { setTrainerInitialSamples([]); setShowTrainer(true); }} className="text-[10px] text-rose-500 hover:text-rose-600 font-bold flex items-center gap-1 active:scale-95"><BrainCircuit size={10}/> 训练新风格</button>
@@ -1273,9 +1321,9 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
                              </div>
                          )}
                      </section>
-                 </>
-             )}
-             {activeLeftTab === 'assets' && (
+                </>
+            )}
+            {activeLeftTab === 'assets' && (
                  <section className="space-y-6">
                      <div>
                          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5"><UserIcon size={12}/> 所有人设 ({libraryData.personas.length})</h3>
@@ -1354,6 +1402,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
          </div>
       </div>
       
+      {/* ... Chat Panel and Right Panel (Preview) remain mostly the same ... */}
       <div className={`flex-1 flex flex-col bg-white relative min-w-0 z-20 ${activeTab === 'chat' ? 'flex' : 'hidden'} lg:flex`}>
           <div className="h-14 border-b border-slate-100 flex items-center justify-between px-6 bg-white sticky top-0 z-10">
               <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div><span className="text-sm font-bold text-slate-900">AI 创作助手</span></div>
@@ -1423,8 +1472,7 @@ const Workstation: React.FC<WorkstationProps> = ({ user, onUserUpdate, onLogout 
               />
           </div>
       </div>
-      
-      {/* ... (Other modals kept exactly as they were) ... */}
+
       {selectedSocialNote && (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in" onClick={() => setSelectedSocialNote(null)}>
                <div className="w-full max-w-5xl h-[85vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex overflow-hidden" onClick={e => e.stopPropagation()}>

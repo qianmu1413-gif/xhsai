@@ -366,7 +366,7 @@ export const streamExpertGeneration = async (
 ) => {
     // 🟢 严谨模式 (Strict Mode) 强化逻辑
     const strictInstruction = fidelity === FidelityMode.STRICT
-        ? "【IMPORTANT: STRICT MODE ACTIVE】\n1. You MUST strictly base your content ONLY on the provided context (Context) and files. \n2. Do NOT hallucinate, do NOT invent features, do NOT add external facts that are not in the source materials.\n3. If the context is empty or insufficient, state that clearly instead of making things up.\n4. Stick faithfully to the facts provided."
+        ? "【IMPORTANT: STRICT MODE ACTIVE】\n1. You MUST strictly base your content ONLY on the provided context (Context) and files. \n2. Do NOT hallucinate. If the context is missing specific details (e.g., price, specs), do NOT invent them. State that they are missing or write generally.\n3. Do NOT add external facts that are not in the source materials.\n4. If the provided context is empty, please ask the user to provide materials instead of generating generic content."
         : "【Creative Mode】\nYou are allowed to expand creatively on the topic, using your knowledge of social media trends to enhance the content.";
 
     const systemText = `You are a professional Xiaohongshu (RedNote) content expert. Output in Chinese (Simplified). 
