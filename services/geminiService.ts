@@ -3,7 +3,6 @@ import { FidelityMode, PersonaAnalysis, BulkNote, AttachedFile, SystemConfig } f
 import { configRepo } from "./repository";
 import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
-import { GoogleGenAI, Type } from "@google/genai";
 
 // 协议分隔符
 const DATA_MARKER = "###MATRIX_DATA_START###";
@@ -108,7 +107,8 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
     return "";
 };
 
-const prepareFilePart = async (file: AttachedFile): Promise<any> => {
+// 🟢 转换为 OpenAI 兼容格式的消息内容
+const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
     try {
         let mimeType = file.mimeType || 'text/plain';
         let base64Data = "";
@@ -116,139 +116,165 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
 
         if (blob) { mimeType = blob.type || mimeType; } 
         else if (file.data.startsWith('http')) {
-            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } catch (fetchErr) { return { text: `[文件读取失败]` }; }
+            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } catch (fetchErr) { return { type: "text", text: `[文件读取失败: ${file.name}]` }; }
         }
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
             base64Data = parts[1];
         }
 
-        if (!blob && !base64Data) return { text: `[读取失败]` };
+        if (!blob && !base64Data) return { type: "text", text: `[读取失败: ${file.name}]` };
 
+        // 1. PDF/DOCX (OpenAI Vision 不直接支持 PDF，转为纯文本)
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
             if (blob) {
                 const pdfText = await extractPdfText(blob);
-                if (pdfText && pdfText.trim().length > 20) return { text: `[PDF内容]:\n${pdfText}` };
+                if (pdfText && pdfText.trim().length > 20) return { type: "text", text: `[PDF内容: ${file.name}]:\n${pdfText}` };
             }
-            if (base64Data) return { inlineData: { mimeType: 'application/pdf', data: base64Data } };
-            if (blob) return { inlineData: { mimeType: 'application/pdf', data: await blobToBase64(blob) } };
-        } 
-        else if (mimeType.startsWith('image/')) {
-            if (base64Data) return { inlineData: { mimeType, data: base64Data } };
-            if (blob) return { inlineData: { mimeType, data: await blobToBase64(blob) } };
+            return { type: "text", text: `[PDF解析失败: ${file.name}]` };
         } 
         else if (file.name.endsWith('.docx') && blob) {
-            return { text: `[DOCX内容]:\n${await extractDocxText(blob)}` };
+            const docxText = await extractDocxText(blob);
+            return { type: "text", text: `[DOCX内容: ${file.name}]:\n${docxText}` };
+        }
+        // 2. Images (OpenAI Vision Format)
+        else if (mimeType.startsWith('image/')) {
+            let finalBase64 = base64Data;
+            if (!finalBase64 && blob) finalBase64 = await blobToBase64(blob);
+            if (finalBase64) {
+                 return {
+                     type: "image_url",
+                     image_url: {
+                         url: `data:${mimeType};base64,${finalBase64}`
+                     }
+                 };
+            }
         } 
+        // 3. Plain Text
         else if (blob) {
-            return { text: `[文本内容]:\n${await blob.text()}` };
+            return { type: "text", text: `[文本内容: ${file.name}]:\n${await blob.text()}` };
         }
-        return { text: `[未知类型]` };
-    } catch (e) { return { text: `[错误]` }; }
+
+        return { type: "text", text: `[未知类型: ${file.name}]` };
+
+    } catch (e) { return { type: "text", text: `[处理错误: ${file.name}]` }; }
 };
 
-// 🟢 拦截器：确保 sk- Key 不会作为 URL 参数发送给 Google
-const createCustomFetch = (apiKey: string) => {
-    return async (input: RequestInfo | URL, init?: RequestInit) => {
-        let urlStr: string;
-        let finalInit: RequestInit = init || {};
 
-        if (typeof input === 'string') {
-            urlStr = input;
-        } else if (input instanceof URL) {
-            urlStr = input.toString();
-        } else if (input instanceof Request) {
-            urlStr = input.url;
-        } else {
-            urlStr = String(input);
-        }
+// 🟢 核心请求函数 (使用 Fetch + OpenAI 协议)
+const callOpenAI = async (
+    config: SystemConfig, 
+    messages: any[], 
+    stream: boolean, 
+    onToken?: (text: string) => void,
+    responseFormat?: any
+) => {
+    // 1. Config Preparation
+    let apiKey = (config.gemini.apiKey || "").trim();
+    let baseUrl = (config.gemini.baseUrl || "https://api.vectorengine.ai/v1").trim();
+    const model = (config.gemini.model || "gemini-3-flash-preview").trim();
 
-        const isSkKey = apiKey.trim().startsWith('sk-');
+    if (!apiKey) throw new Error("API Key 未配置");
+    
+    // Normalize URL: Ensure no trailing slash, add /chat/completions
+    if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+    if (!baseUrl.endsWith('/v1')) {
+         // Some users might forget /v1, but strict ones include it.
+         // Given the prompt explicitly said "https://api.vectorengine.ai/v1", we assume the user puts that in baseUrl.
+    }
+    const endpoint = `${baseUrl}/chat/completions`;
 
-        if (isSkKey) {
-            // 1. 清洗 URL (移除 key 参数)
-            try {
-                const urlObj = new URL(urlStr);
-                if (urlObj.searchParams.has('key')) {
-                    urlObj.searchParams.delete('key');
-                    urlStr = urlObj.toString();
-                }
-            } catch (e) {}
-
-            // 2. 注入 Header
-            const headers = new Headers(finalInit.headers || {});
-            headers.set('Authorization', `Bearer ${apiKey.trim()}`);
-            headers.set('x-goog-api-key', apiKey.trim());
-            headers.set('Content-Type', 'application/json');
-
-            finalInit = { ...finalInit, headers };
-            
-            return fetch(urlStr, finalInit);
-        }
-
-        return fetch(input, init);
+    // 2. Request Body
+    const body: any = {
+        model: model,
+        messages: messages,
+        stream: stream
     };
-};
-
-// 🟢 Base URL 清洗工具
-const cleanBaseUrl = (url: string | undefined): string | undefined => {
-    if (!url || !url.trim()) return undefined;
-    let clean = url.trim();
-    if (clean.endsWith('/')) clean = clean.slice(0, -1);
-    return clean;
-};
-
-const getAIClient = async (overrideConfig?: SystemConfig) => {
-    let apiKey: string;
-    let baseUrl: string;
-
-    if (overrideConfig) {
-        apiKey = overrideConfig.gemini.apiKey;
-        baseUrl = overrideConfig.gemini.baseUrl;
-        console.log(`[Gemini] Test Mode Use Input Config`);
-    } else {
-        const config = await configRepo.getSystemConfig();
-        apiKey = config.gemini.apiKey;
-        baseUrl = config.gemini.baseUrl;
-    }
     
-    // 安全去空格
-    apiKey = (apiKey || '').trim();
-    baseUrl = (baseUrl || '').trim();
-    
-    if (!apiKey) throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
-
-    // 🔴 强制熔断检查
-    if (apiKey.startsWith('sk-')) {
-        if (!baseUrl) {
-            throw new Error("❌ 配置缺失：检测到 'sk-' 开头的 Key，但【Base URL】为空。\n\n请在设置中填写您的第三方网关地址（例如 https://api.openai-proxy.com/v1/gemini），并点击保存。");
-        }
-        if (baseUrl.includes('googleapis.com')) {
-            throw new Error("❌ 配置错误：'sk-' Key 不能配合 googleapis.com 使用。\n请填写您的第三方中转/网关地址。");
-        }
+    if (responseFormat) {
+        // Only add if explicitly requested (some models might strictly require it or not support it)
+        body.response_format = responseFormat;
     }
 
-    const finalBaseUrl = cleanBaseUrl(baseUrl);
-
-    return new GoogleGenAI({ 
-        apiKey: apiKey,
-        ...(finalBaseUrl ? { baseUrl: finalBaseUrl } : {}),
-        fetch: createCustomFetch(apiKey) 
+    // 3. Execute Fetch
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(body)
     });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`请求失败 (${response.status}): ${errText.substring(0, 200)}`);
+    }
+
+    // 4. Handle Response
+    if (stream && onToken) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder("utf-8");
+        if (!reader) throw new Error("无法读取流响应");
+
+        let buffer = "";
+        let fullText = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ""; // Keep incomplete line
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed === 'data: [DONE]') continue;
+                if (trimmed.startsWith('data: ')) {
+                    try {
+                        const jsonStr = trimmed.slice(6);
+                        const json = JSON.parse(jsonStr);
+                        const content = json.choices?.[0]?.delta?.content;
+                        if (content) {
+                            fullText += content;
+                            onToken(content); // Pass Delta
+                        }
+                    } catch (e) {
+                        console.warn("Stream Parse Error:", e);
+                    }
+                }
+            }
+        }
+        return fullText;
+    } else {
+        const json = await response.json();
+        const content = json.choices?.[0]?.message?.content;
+        if (!content && json.error) throw new Error(json.error.message);
+        return content || "";
+    }
 };
+
+// --- 业务函数 ---
 
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
     if (files.length === 0) return "无文件";
     try {
         const config = await configRepo.getSystemConfig();
-        const ai = await getAIClient(config);
-        const fileParts = await Promise.all(files.map(prepareFilePart));
-        // 🟢 动态使用配置中的模型，不再硬编码
-        const response = await ai.models.generateContent({
-            model: config.gemini.model || 'gemini-3-pro-preview',
-            contents: { parts: [{ text: "分析素材卖点" }, ...fileParts] },
-        });
-        return cleanText(response.text || "分析失败");
+        const fileParts = await Promise.all(files.map(prepareOpenAIPart));
+        
+        const messages = [
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: "请详细分析这些素材的卖点、核心信息以及适合的小红书营销角度。" },
+                    ...fileParts
+                ]
+            }
+        ];
+
+        const text = await callOpenAI(config, messages, false);
+        return cleanText(text || "分析失败");
     } catch (e: any) { return `错误: ${e.message}`; }
 };
 
@@ -291,35 +317,34 @@ export const streamExpertGeneration = async (
     const systemText = `You are a content expert. Output in Chinese. ${personaPrompt || ''} ${count > 1 ? 'Generate ' + count + ' versions via ### 方案1 format.' : 'Generate 1 version.'}`;
     try {
         const config = await configRepo.getSystemConfig();
-        // 如果这里 config.gemini.baseUrl 为空，getAIClient 会抛出明确错误
-        const ai = await getAIClient(config); 
-        const fileParts = await Promise.all(files.map(prepareFilePart));
+        const fileParts = await Promise.all(files.map(prepareOpenAIPart));
         
-        const response = await ai.models.generateContentStream({
-            model: config.gemini.model || 'gemini-3-pro-preview',
-            contents: { parts: [{ text: context }, ...fileParts] },
-            config: { systemInstruction: systemText, temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85 }
+        const messages = [
+            { role: "system", content: systemText },
+            { 
+                role: "user", 
+                content: [
+                    { type: "text", text: context },
+                    ...fileParts
+                ]
+            }
+        ];
+
+        let accumulatedText = "";
+
+        await callOpenAI(config, messages, true, (delta) => {
+            accumulatedText += delta;
+            // The existing UI expects the full text to be passed to onToken for replacement
+            onToken(cleanText(accumulatedText), "");
         });
 
-        let fullText = "";
-        for await (const chunk of response) {
-            if (chunk.text) {
-                fullText += chunk.text;
-                onToken(cleanText(fullText), "");
-            }
-        }
-        const cleaned = cleanText(fullText);
+        const cleaned = cleanText(accumulatedText);
         let parsedNotes = count > 1 ? parseBulkNotes(cleaned) : [parseSingleNote(cleaned)].filter(n => n) as BulkNote[];
         return { dialogueText: cleaned, thought: "", notes: parsedNotes };
+
     } catch (e: any) {
         let errorMsg = e.message || "未知错误";
-        
-        // 🟢 不再掩盖真实错误，而是附加提示
-        // 400 Bad Request 可能包含 "Invalid model", "Context length exceeded", "Invalid JSON" 等关键信息
-        if (errorMsg.includes('400')) {
-             errorMsg += `\n\n💡 提示：收到 400 错误。如果是第三方网关，请检查：\n1. Base URL 是否正确 (有些网关不需要 /v1 后缀) \n2. 检查 Model 名称是否支持 \n3. 网关可能不支持 Google 协议 (需要 OpenAI 格式)`;
-        }
-        
+        if (errorMsg.includes('400')) errorMsg += "\n(请检查 Base URL 是否为 OpenAI 兼容格式，如 /v1)";
         return { dialogueText: `生成出错: ${errorMsg}`, thought: "", notes: [] };
     }
 };
@@ -327,28 +352,16 @@ export const streamExpertGeneration = async (
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
         const config = await configRepo.getSystemConfig();
-        const ai = await getAIClient(config);
-        const response = await ai.models.generateContent({
-            model: config.gemini.model || 'gemini-3-pro-preview',
-            contents: `Analyze persona: ${samples}`,
-            config: {
-                systemInstruction: ANALYSIS_SYSTEM_PROMPT,
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        tone: { type: Type.STRING },
-                        keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        emojiDensity: { type: Type.STRING },
-                        structure: { type: Type.STRING },
-                        writerPersonaPrompt: { type: Type.STRING }
-                    }
-                }
-            }
-        });
-        const resultText = response.text || "{}";
-        onToken(resultText);
-        return extractAndParseJSON(resultText) || { tone: "默认" };
+        const messages = [
+            { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+            { role: "user", content: `Analyze persona: ${samples}` }
+        ];
+
+        // Try to use JSON mode if supported by the gateway/model
+        const text = await callOpenAI(config, messages, false, undefined, { type: "json_object" });
+        
+        onToken(text);
+        return extractAndParseJSON(text) || { tone: "默认" };
     } catch (e: any) {
         return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" };
     }
@@ -356,27 +369,16 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 
 export const testConnection = async (inputConfig?: SystemConfig) => {
     try {
-        const ai = await getAIClient(inputConfig);
-        const modelName = inputConfig?.gemini?.model || 'gemini-3-flash-preview';
-
-        const response = await ai.models.generateContent({
-            model: modelName,
-            contents: 'ping',
-        });
+        const config = inputConfig || await configRepo.getSystemConfig();
+        const messages = [{ role: "user", content: "ping" }];
         
-        return { success: !!response.text, message: response.text ? `✅ 连接成功: ${response.text.substring(0, 50)}` : "❌ 收到空响应" };
+        const text = await callOpenAI(config, messages, false);
+        
+        return { success: !!text, message: text ? `✅ 连接成功: ${text.substring(0, 30)}...` : "❌ 收到空响应" };
 
     } catch (e: any) {
         let msg = e.message || "未知错误";
-        
-        // 智能错误诊断
-        if (msg.includes('400')) {
-            msg = `❌ 400 请求被拒绝。\n原文: ${msg}\n\n💡 检查: Base URL 是否正确? 模型名称是否正确?`;
-        } else if (msg.includes('404')) {
-            msg = `[404 路径错误] 模型未找到。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
-        } else if (msg.includes('Failed to fetch')) {
-            msg = `[网络错误] 无法连接到服务器。\n请检查 Base URL 是否正确 (是否需要跨域/CORS 支持?)。`;
-        }
+        if (msg.includes('404')) msg += "\n(请检查 Base URL 是否正确，需包含 /v1)";
         return { success: false, message: msg };
     }
 };

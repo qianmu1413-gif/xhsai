@@ -32,7 +32,8 @@ const getEnv = (key: string) => {
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
         apiKey: getEnv('API_KEY') || "", 
-        baseUrl: getEnv('GEMINI_BASE_URL') || "", 
+        // 🟢 Updated: Default to VectorEngine as requested
+        baseUrl: getEnv('GEMINI_BASE_URL') || "https://api.vectorengine.ai/v1", 
         model: "gemini-3-flash-preview" 
     },
     xhs: { 
