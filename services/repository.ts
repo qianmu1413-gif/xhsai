@@ -68,6 +68,7 @@ const DEFAULT_CONFIG: SystemConfig = {
 export const configRepo = {
     getSystemConfig: async (): Promise<SystemConfig> => {
         let dbConfig: any = null;
+        let localConfig: any = null;
 
         // 1. 优先尝试从云端数据库加载
         if (supabase) {
@@ -79,29 +80,30 @@ export const configRepo = {
             } catch (e) { console.warn("Cloud Config Load Warning:", e); }
         }
 
-        // 2. 降级方案：如果云端没数据（或没连上），尝试从本地 LocalStorage 加载
-        // 这确保管理员在自己电脑上配置后，即使数据库表不存在也能使用自定义 API
-        if (!dbConfig && typeof localStorage !== 'undefined') {
+        // 2. 加载本地缓存 (Sync)
+        if (typeof localStorage !== 'undefined') {
             try {
                 const local = localStorage.getItem('rednote_sys_config');
                 if (local) {
-                    dbConfig = JSON.parse(local);
-                    console.log("[Config] Loaded from LocalStorage fallback");
+                    localConfig = JSON.parse(local);
+                    console.debug("[Config] Loaded LocalStorage override");
                 }
             } catch(e) {}
         }
 
-        // 3. 深度合并逻辑：加载的配置 > 默认环境变量配置
-        if (dbConfig) {
-            return {
-                gemini: { ...DEFAULT_CONFIG.gemini, ...(dbConfig.gemini || {}) },
-                xhs: { ...DEFAULT_CONFIG.xhs, ...(dbConfig.xhs || {}) },
-                publish: { ...DEFAULT_CONFIG.publish, ...(dbConfig.publish || {}) },
-                cos: { ...DEFAULT_CONFIG.cos, ...(dbConfig.cos || {}) }
-            };
-        }
-        
-        return DEFAULT_CONFIG;
+        // 3. 深度合并逻辑：本地配置 > 云端配置 > 默认配置
+        // 🚨 强制优先本地：确保当前管理员在设置面板保存的配置立即生效，防止云端数据滞后导致回退到默认
+        const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(dbConfig?.gemini || {}), ...(localConfig?.gemini || {}) };
+        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}), ...(localConfig?.xhs || {}) };
+        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}), ...(localConfig?.publish || {}) };
+        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(dbConfig?.cos || {}), ...(localConfig?.cos || {}) };
+
+        return {
+            gemini: mergedGemini,
+            xhs: mergedXhs,
+            publish: mergedPublish,
+            cos: mergedCos
+        };
     },
 
     saveSystemConfig: async (config: SystemConfig) => {

@@ -235,9 +235,9 @@ const getAIClient = async () => {
     
     if (!baseUrl || baseUrl.trim() === "") {
         baseUrl = undefined;
-        console.debug("[Gemini] Using Default Google Endpoint");
+        console.log("%c[Gemini] Mode: DEFAULT GOOGLE API", "color: orange; font-weight: bold;");
     } else {
-        console.debug(`[Gemini] Using Custom Gateway: ${baseUrl}`);
+        console.log(`%c[Gemini] Mode: CUSTOM GATEWAY (${baseUrl})`, "color: cyan; font-weight: bold;");
     }
 
     if (!apiKey) {
@@ -463,6 +463,10 @@ export const testConnection = async () => {
         });
         return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
     } catch (e: any) {
-        return { success: false, message: e.message || "连接发生未知错误" };
+        let msg = e.message || "连接发生未知错误";
+        if (msg.includes('400') || msg.includes('API key not valid')) {
+            msg = "API Key 无效或不被该网关接受 (400)。请检查 Base URL 和 Key 是否匹配。";
+        }
+        return { success: false, message: msg };
     }
 };
