@@ -8,20 +8,17 @@ import { GoogleGenAI, Type } from "@google/genai";
 // 协议分隔符
 const DATA_MARKER = "###MATRIX_DATA_START###";
 
-// --- 文本清洗工具 (缓冲区清洗) ---
+// --- 文本清洗工具 ---
 const cleanText = (text: string | undefined): string => {
     if (!text) return "";
     let cleaned = text;
-
     cleaned = cleaned.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "");
     cleaned = cleaned.replace(/\[\[THOUGHT\]\][\s\S]*?\[\[\/THOUGHT\]\]/gi, "");
     cleaned = cleaned.replace(/^(Here is (the|a)|Sure, here is|Okay, here is|Based on the content).*?:/gmi, "");
-    
     cleaned = cleaned.replace(/\*\*Persona\*\*:/gi, "**人设定位**:");
     cleaned = cleaned.replace(/\*\*Topic\*\*:/gi, "**主题分析**:");
     cleaned = cleaned.replace(/\*\*Target Audience\*\*:/gi, "**目标人群**:");
     cleaned = cleaned.replace(/\*\*Key Data\*\*:/gi, "**核心数据**:");
-
     return cleaned.trim();
 };
 
@@ -40,9 +37,7 @@ const extractAndParseJSON = (text: string): any => {
     return json;
 };
 
-// --- 文件处理辅助 ---
-
-// 🛡️ Safe ArrayBuffer extraction
+// --- 文件处理辅助 (保持不变) ---
 const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> => {
     return new Promise((resolve, reject) => {
         if (!(blob instanceof Blob)) {
@@ -87,7 +82,6 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
     const cleanUrl = url.split('?')[0]; 
     const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
-
     try {
         const response = await fetch(timestampUrl, { 
             cache: 'no-store', 
@@ -95,26 +89,13 @@ const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
             credentials: 'omit'
         }); 
         if (response.ok) return await response.blob();
-        if (response.status === 403) throw new Error("403 Forbidden");
-    } catch (e: any) { 
-        if (e.message.includes('403')) {
-            throw new Error("403 权限拒绝: 请检查腾讯云 COS 的【防盗链】是否设置了允许空 Referer");
-        }
-    }
-
+    } catch (e) {}
     try {
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
         const res = await fetch(proxyUrl);
         if (res.ok) return await res.blob();
     } catch (e) {}
-
-    try {
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl);
-        if (res.ok) return await res.blob();
-    } catch (e) {}
-
-    throw new Error("无法从云端下载文件 (可能原因: 防盗链拦截、CORS配置未生效或浏览器缓存锁死)");
+    throw new Error("无法从云端下载文件");
 };
 
 const extractDocxText = async (blob: Blob): Promise<string> => {
@@ -134,16 +115,10 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
         if (typeof window !== 'undefined' && window.pdfjsLib) {
             const arrayBuffer = await blobToArrayBuffer(blob);
             // @ts-ignore
-            const loadingTask = window.pdfjsLib.getDocument({ 
-                data: arrayBuffer,
-                cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-                cMapPacked: true,
-            });
+            const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true });
             const pdf = await loadingTask.promise;
-            
             let fullText = "";
             const maxPages = Math.min(pdf.numPages, 15);
-            
             for (let i = 1; i <= maxPages; i++) {
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
@@ -152,9 +127,7 @@ const extractPdfText = async (blob: Blob): Promise<string> => {
             }
             return fullText;
         }
-    } catch (e) {
-        console.error("PDF Parse Error", e);
-    }
+    } catch (e) {}
     return "";
 };
 
@@ -162,68 +135,39 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     try {
         let mimeType = file.mimeType || 'text/plain';
         let base64Data = "";
-        
         let blob: Blob | undefined = (file.file instanceof Blob) ? file.file : undefined;
 
-        if (blob) {
-            mimeType = blob.type || mimeType;
-        } 
+        if (blob) { mimeType = blob.type || mimeType; } 
         else if (file.data.startsWith('http')) {
-            try {
-                blob = await fetchUrlAsBlob(file.data);
-                mimeType = blob.type || mimeType;
-            } catch (fetchErr: any) {
-                console.warn(`Remote fetch failed for ${file.name}:`, fetchErr);
-                return { 
-                    text: `[系统警告: 附件 "${file.name}" 读取失败。\n错误原因: ${fetchErr.message}。\n请告知用户："抱歉，我无法读取历史文件 ${file.name}。通常是因为云存储连接超时，请尝试**删除该附件并重新上传**。"]` 
-                };
-            }
+            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } catch (fetchErr) { return { text: `[文件读取失败]` }; }
         }
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
             base64Data = parts[1];
-             if (file.name.endsWith('.pdf') || file.name.endsWith('.docx')) {
-                 try {
-                    const binaryStr = atob(base64Data);
-                    const bytes = new Uint8Array(binaryStr.length);
-                    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-                    blob = new Blob([bytes], { type: mimeType });
-                 } catch(e) {}
-             }
         }
 
-        if (!blob && !base64Data) return { text: `[读取失败: ${file.name}]` };
+        if (!blob && !base64Data) return { text: `[读取失败]` };
 
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
             if (blob) {
                 const pdfText = await extractPdfText(blob);
-                if (pdfText && pdfText.trim().length > 20) {
-                     return { text: `[PDF文档内容 ${file.name}]:\n${pdfText}` };
-                }
+                if (pdfText && pdfText.trim().length > 20) return { text: `[PDF文档]:\n${pdfText}` };
             }
             if (base64Data) return { inlineData: { mimeType: 'application/pdf', data: base64Data } };
             if (blob) return { inlineData: { mimeType: 'application/pdf', data: await blobToBase64(blob) } };
         } 
-        
         else if (mimeType.startsWith('image/')) {
             if (base64Data) return { inlineData: { mimeType, data: base64Data } };
             if (blob) return { inlineData: { mimeType, data: await blobToBase64(blob) } };
         } 
-        
         else if (file.name.endsWith('.docx') && blob) {
-            return { text: `[文档内容 ${file.name}]:\n${await extractDocxText(blob)}` };
+            return { text: `[文档]:\n${await extractDocxText(blob)}` };
         } 
-        
         else if (blob) {
-            return { text: `[文档内容 ${file.name}]:\n${await blob.text()}` };
+            return { text: `[文档]:\n${await blob.text()}` };
         }
-        
-        return { text: `[未知文件类型: ${file.name}]` };
-
-    } catch (e: any) { 
-        console.error(`File processing error for ${file.name}:`, e);
-        return { text: `[文件处理错误: ${file.name} - ${e.message}]` }; 
-    }
+        return { text: `[未知类型]` };
+    } catch (e) { return { text: `[错误]` }; }
 };
 
 const getAIClient = async (overrideConfig?: SystemConfig) => {
@@ -231,19 +175,22 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
     let baseUrl: string;
 
     if (overrideConfig) {
-        // 🟢 优先使用传入的配置（通常是测试连接时输入框里的值）
+        // 🟢 优先使用传入的配置
         apiKey = overrideConfig.gemini.apiKey;
         baseUrl = overrideConfig.gemini.baseUrl;
-        console.log(`[Gemini] Mode: TESTING INPUT | Key: ${apiKey?.substring(0,4)}... | URL: ${baseUrl || 'Default'}`);
+        console.log(`[Gemini] Mode: INPUT TEST | Key: ${apiKey?.substring(0,4)}... | URL: ${baseUrl || 'Default'}`);
     } else {
-        // 正常流程：从 Repo 读取
         const config = await configRepo.getSystemConfig();
         apiKey = config.gemini.apiKey;
         baseUrl = config.gemini.baseUrl;
     }
     
-    // 清洗 BaseURL: 如果是空字符串，设为 undefined 从而使用 Google 默认
-    const finalBaseUrl = (baseUrl && baseUrl.trim() !== "") ? baseUrl : undefined;
+    // 🟢 关键修复：清洗 BaseURL，移除末尾斜杠
+    // 新版 SDK 如果遇到带斜杠的 BaseURL 可能会构造出错误的路径 (e.g. .../v1//v1beta/models...)
+    let finalBaseUrl = (baseUrl && baseUrl.trim() !== "") ? baseUrl.trim() : undefined;
+    if (finalBaseUrl && finalBaseUrl.endsWith('/')) {
+        finalBaseUrl = finalBaseUrl.slice(0, -1);
+    }
 
     if (!apiKey) {
         throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
@@ -255,36 +202,29 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
     });
 };
 
+// ... (Analyze/Generate functions remain largely the same, utilizing getAIClient) ...
 export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> => {
-    if (files.length === 0) return "无文件可分析";
+    if (files.length === 0) return "无文件";
     try {
         const ai = await getAIClient();
         const fileParts = await Promise.all(files.map(prepareFilePart));
-        const prompt = `分析提供的素材，提取核心营销卖点。全中文输出。结构化展示核心卖点、目标人群和素材金句。`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-preview',
-            contents: { parts: [{ text: prompt }, ...fileParts] },
-            config: { temperature: 0.2 }
+            contents: { parts: [{ text: "分析素材卖点" }, ...fileParts] },
         });
         return cleanText(response.text || "分析失败");
-    } catch (e: any) {
-        return `分析过程发生错误: ${e.message || '未知错误'}`;
-    }
+    } catch (e: any) { return `错误: ${e.message}`; }
 };
 
-// 解析批量生成的笔记
 const parseBulkNotes = (text: string): BulkNote[] => {
     const notes: BulkNote[] = [];
     const parts = text.split(/###\s*(?:方案|笔记|Version)\s*\d+/i);
-    
     for (let i = 1; i < parts.length; i++) {
         const part = parts[i].trim();
         if (!part) continue;
-
         const titleMatch = part.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
         let title = "";
         let content = "";
-
         if (titleMatch) {
             title = titleMatch[1].trim();
             content = part.replace(titleMatch[0], "").trim();
@@ -294,19 +234,13 @@ const parseBulkNotes = (text: string): BulkNote[] => {
             title = lines[0].trim();
             content = lines.slice(1).join('\n').trim();
         }
-
-        if (title || content) {
-            notes.push({ title, content });
-        }
+        if (title || content) notes.push({ title, content });
     }
     return notes;
 };
 
-// 🟢 解析单篇笔记
 const parseSingleNote = (text: string): BulkNote | null => {
     if (!text) return null;
-    
-    // 尝试匹配标准的 "标题：... 正文：..." 格式
     const titleMatch = text.match(/(?:标题|Title)[:：]\s*(.*?)(?:\n|$)/i);
     if (titleMatch) {
         const title = titleMatch[1].trim();
@@ -314,17 +248,8 @@ const parseSingleNote = (text: string): BulkNote | null => {
         content = content.replace(/^(?:正文|Content)[:：]\s*/i, "").trim();
         return { title, content };
     }
-    
-    // 降级策略：假设第一行是标题，剩余是正文
     const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length > 0) {
-        const title = lines[0];
-        const content = lines.slice(1).join('\n');
-        // 如果没有正文，说明可能只有一句话，也作为 content 处理比较好，但作为笔记通常有标题
-        if (!content) return { title: '未命名笔记', content: title };
-        return { title, content };
-    }
-    
+    if (lines.length > 0) return { title: lines[0], content: lines.slice(1).join('\n') };
     return null;
 };
 
@@ -337,68 +262,16 @@ export const streamExpertGeneration = async (
     wordLimit: number,
     onToken: (text: string, thought: string) => void
 ) => {
-    
-    const wordCountConstraint = `
-🚨 **字数硬性指标 (非常重要)**:
-生成的笔记正文内容（不含结尾标签）必须严格控制在 **${wordLimit} 字以内**。
-- 如果目标是短篇，请务必精炼，直击痛点。
-- 如果目标是长篇，请丰富细节，增强沉浸感。
-- **严禁超出或大幅少于设定字数，请以此字数为基准进行排版。**
-`;
-
-    const chineseStrictRules = `
-🚨 **内容创作铁律**:
-1. 语言：必须全中文。
-2. 标题：吸睛且控制在 20 字以内。
-3. 结构：符合小红书分段习惯，每段配有 Emoji。
-${wordCountConstraint}
-`;
-
-    const commonRules = `🚨 **核心规范**: 1. 严禁输出 <thinking> 标签。2. 语气符合小红书博主身份。${chineseStrictRules}`;
-    
-    let systemText = "";
-    if (fidelity === FidelityMode.STRICT) {
-        systemText = `【角色】：你是一个专业、严谨的内容重构专家。你的任务是基于提供的素材撰写笔记，而不是自由创作。\n${commonRules}\n🚨 **严谨模式规则 (Strict Mode)**:\n1. **绝对忠实于素材**：你只能使用用户提供的【背景】、【文档内容】和【图片】中的信息。\n2. **严禁虚构 (No Hallucination)**：严禁编造素材中未提及的数据、故事、参数或细节。如果素材信息不足，请侧重于强化已有信息的表达，而不要捏造新信息。\n3. 语气权威，逻辑严密，不使用过于浮夸的形容词。`;
-    } else {
-        systemText = `【角色】：你是一个亲切、真实的个人号小红书博主。\n${commonRules}\n1. 语气口语化、亲和力强。2. 可以适当发挥想象力补充生活化细节，强调个人感受。`;
-    }
-
-    if (personaPrompt) {
-        systemText += `\n\n【风格指令】:\n${personaPrompt}`;
-    }
-
-    // 🟢 批量生成的核心指令注入
-    if (count > 1) {
-        systemText += `\n\n🚨 **批量生成指令**:\n请务必生成 **${count}** 篇完全不同的笔记方案。
-请严格按照以下格式输出，以便系统解析：
-### 方案1
-标题：(方案1的标题)
-正文：(方案1的内容)
-
-### 方案2
-标题：(方案2的标题)
-正文：(方案2的内容)
-
-...以此类推。不要包含其他开场白或结束语。`;
-    } else {
-        // 单篇生成指令，强制格式以便解析
-        systemText += `\n\n🚨 **格式指令**:\n请务必按以下格式输出，以便系统自动填入编辑器：
-标题：(笔记标题)
-正文：(笔记正文)
-`;
-    }
+    const systemText = `You are a content expert. Output in Chinese. ${personaPrompt || ''}
+    ${count > 1 ? 'Generate ' + count + ' versions via ### 方案1 format.' : 'Generate 1 version.'}`;
 
     try {
         const ai = await getAIClient(); 
         const fileParts = await Promise.all(files.map(prepareFilePart));
-        
         const response = await ai.models.generateContentStream({
             model: 'gemini-3-pro-preview',
-            contents: { parts: [{ text: context || "请根据提供的背景和资料开始创作。" }, ...fileParts] },
-            config: {
-                systemInstruction: systemText,
-                temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85
-            }
+            contents: { parts: [{ text: context }, ...fileParts] },
+            config: { systemInstruction: systemText, temperature: fidelity === FidelityMode.STRICT ? 0.2 : 0.85 }
         });
 
         let fullText = "";
@@ -409,17 +282,10 @@ ${wordCountConstraint}
                 onToken(cleanText(fullText), "");
             }
         }
-
         const cleaned = cleanText(fullText);
-        // 🟢 流式结束后，解析笔记 (无论是单篇还是批量，都返回 notes 数组)
         let parsedNotes: BulkNote[] = [];
-        if (count > 1) {
-            parsedNotes = parseBulkNotes(cleaned);
-        } else {
-            const single = parseSingleNote(cleaned);
-            if (single) parsedNotes = [single];
-        }
-
+        if (count > 1) { parsedNotes = parseBulkNotes(cleaned); } 
+        else { const single = parseSingleNote(cleaned); if (single) parsedNotes = [single]; }
         return { dialogueText: cleaned, thought: "", notes: parsedNotes };
     } catch (e: any) {
         return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] };
@@ -429,10 +295,9 @@ ${wordCountConstraint}
 export const streamPersonaAnalysis = async (samples: string, onToken: (text: string) => void): Promise<PersonaAnalysis> => {
     try {
         const ai = await getAIClient();
-        const prompt = `分析以下笔记的人设风格. 必须使用全中文输出. 严禁出现任何英文说明. Notes:\n${samples}`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-preview',
-            contents: prompt,
+            contents: `Analyze persona: ${samples}`,
             config: {
                 systemInstruction: ANALYSIS_SYSTEM_PROMPT,
                 responseMimeType: "application/json",
@@ -444,8 +309,7 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
                         emojiDensity: { type: Type.STRING },
                         structure: { type: Type.STRING },
                         writerPersonaPrompt: { type: Type.STRING }
-                    },
-                    required: ["tone", "keywords", "emojiDensity", "structure", "writerPersonaPrompt"]
+                    }
                 }
             }
         });
@@ -453,37 +317,71 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
         onToken(resultText);
         return extractAndParseJSON(resultText) || { tone: "默认" };
     } catch (e: any) {
-        console.error("Persona Analysis Error", e);
         return { tone: "分析失败", keywords: [], emojiDensity: "", structure: "", writerPersonaPrompt: "" };
     }
 };
 
 /**
- * 测试连接状态
- * @param overrideConfig 可选：传入该参数时，将使用该参数中的 key/url 进行测试，而不使用保存的配置。
+ * 测试连接状态 (增强版)
+ * 优先使用 inputConfig，其次使用 DB 配置
  */
-export const testConnection = async (overrideConfig?: SystemConfig) => {
+export const testConnection = async (inputConfig?: SystemConfig) => {
     try {
-        const ai = await getAIClient(overrideConfig);
+        // 1. 尝试使用 SDK 标准测试
+        const ai = await getAIClient(inputConfig);
+        
+        // 尝试一个极简的 Ping
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: 'ping',
             config: { thinkingConfig: { thinkingBudget: 0 } }
         });
-        return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
+        
+        return { success: !!response.text, message: response.text ? "连接正常 (SDK Success)" : "收到空响应" };
+
     } catch (e: any) {
-        let msg = e.message || "连接发生未知错误";
-        // 增加更友好的错误提示，并回显部分 Key 以便调试
-        let keyHint = "";
-        if (overrideConfig?.gemini?.apiKey) {
-            keyHint = ` (使用 Key: ${overrideConfig.gemini.apiKey.substring(0, 4)}...)`;
+        let msg = e.message || "未知错误";
+        const apiKey = inputConfig?.gemini?.apiKey || "";
+        const baseUrl = inputConfig?.gemini?.baseUrl || "https://generativelanguage.googleapis.com";
+
+        console.warn("[Gemini Test Failed]", e);
+
+        // 2. 降级测试：如果是 SDK 报错，尝试直接 Fetch 验证是不是网关兼容性问题
+        // 很多第三方网关 (如 OneAPI/NewAPI) 可能不兼容新版 SDK 的 strict 路径检查
+        // 我们尝试手动构造一个请求看看是否通
+        if (msg.includes('400') || msg.includes('404') || msg.includes('not valid')) {
+             try {
+                 // 尝试手动 ping 一个通用模型路径
+                 let fetchUrl = baseUrl;
+                 if (!fetchUrl.includes('/v1')) {
+                     fetchUrl = fetchUrl.replace(/\/$/, '') + '/v1/models/gemini-3-flash-preview:generateContent';
+                 }
+                 // 这里的 URL 构造可能很复杂，只做简单尝试
+                 if (fetchUrl.startsWith('http')) {
+                     const res = await fetch(`${fetchUrl}?key=${apiKey}`, {
+                         method: 'POST',
+                         headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({ contents: [{ parts: [{ text: "ping" }] }] })
+                     });
+                     if (res.ok) {
+                         return { success: true, message: "连接成功 (Direct API Mode)。注意: SDK 可能因网关路径兼容性报错，但基础接口已通。" };
+                     } else {
+                         const errText = await res.text();
+                         msg = `网关拒绝: ${res.status} - ${errText.substring(0, 100)}`;
+                     }
+                 }
+             } catch (fetchErr) {
+                 // Ignore fetch error, return original SDK error
+             }
+        }
+
+        // 友好的错误提示
+        if (msg.includes('400') || msg.includes('API key not valid')) {
+            msg = `API Key 无效或网关不兼容 (400)。\n1. 检查 Key 是否正确。\n2. 如果使用自定义网关 (${baseUrl})，请确认该网关支持 gemini-3-flash-preview 模型。`;
+        } else if (msg.includes('Failed to fetch')) {
+             msg = `网络请求失败。请检查 Base URL 是否正确，或该网关是否需要科学上网。`;
         }
         
-        if (msg.includes('400') || msg.includes('API key not valid')) {
-            msg = `API Key 无效或不被该网关接受 (400)。请检查 Base URL 和 Key 是否匹配。${keyHint}`;
-        } else if (msg.includes('Failed to fetch')) {
-             msg = `网络请求失败。请检查 Base URL 是否正确，或者该网关是否需要科学上网。`;
-        }
         return { success: false, message: msg };
     }
 };

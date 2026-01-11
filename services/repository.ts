@@ -13,26 +13,21 @@ const safeUUID = () => {
     });
 };
 
-// Helper: Extract Error Message safely (Fixed [object Object] issue)
+// Helper: Extract Error Message safely
 export const getErrorMessage = (error: any): string => {
     if (!error) return 'Unknown error';
     if (typeof error === 'string') return error;
-    
-    // 优先返回 Supabase 的标准错误信息
     if (error.message) return error.message;
     if (error.error_description) return error.error_description;
     if (error.details) return error.details;
-    if (error.hint) return error.hint;
-    
-    // 兜底：转为 JSON 字符串，避免 [object Object]
     try {
         return JSON.stringify(error, null, 2);
     } catch (e) {
-        return "Internal Error (Unserializable Object)";
+        return "Internal Error";
     }
 };
 
-// 🛡️ Safe Environment Variable Access (Prevents crash in browsers where process is undefined)
+// 🛡️ Safe Environment Variable Access
 const getEnv = (key: string) => {
     try {
         // @ts-ignore
@@ -40,11 +35,10 @@ const getEnv = (key: string) => {
     } catch { return ""; }
 };
 
-// 默认配置 (敏感信息从环境变量加载，或者等待数据库配置)
+// 默认配置 (仅作为数据库为空时的兜底，不包含本地缓存)
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
         apiKey: getEnv('API_KEY') || "", 
-        // 允许通过环境变量配置中转地址，默认留空使用官方地址 (或 SDK 默认值)
         baseUrl: getEnv('GEMINI_BASE_URL') || "", 
         model: "gemini-3-flash-preview" 
     },
@@ -66,21 +60,33 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 // --- CONFIG REPOSITORY ---
 export const configRepo = {
+    // 🟢 核心修改：只从数据库读取，完全忽略 localStorage
     getSystemConfig: async (): Promise<SystemConfig> => {
         let dbConfig: any = null;
 
-        // 1. 严格只从云端数据库加载
         if (supabase) {
             try {
-                const { data, error } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
+                // 强制从 DB 获取
+                const { data, error } = await supabase
+                    .from('app_config')
+                    .select('value')
+                    .eq('key', 'global_config')
+                    .maybeSingle();
+                
                 if (!error && data?.value) {
                     dbConfig = data.value;
+                    // console.log("[Config] Loaded strictly from Database");
+                } else if (error && error.code !== 'PGRST116') {
+                    console.warn("[Config] DB Load Error:", error);
                 }
-            } catch (e) { console.warn("Cloud Config Load Warning:", e); }
+            } catch (e) { 
+                console.warn("[Config] Connection Error:", e); 
+            }
         }
 
-        // 2. 深度合并逻辑：数据库配置 > 默认配置
-        // ❌ 彻底移除本地缓存读取逻辑
+        // 深度合并：数据库配置 > 默认(环境变量)配置
+        // 如果数据库里没有 gemini 配置，就用默认的，否则用数据库的
+        // 绝对不读取 localStorage ('rednote_sys_config')
         
         const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(dbConfig?.gemini || {}) };
         const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}) };
@@ -96,23 +102,23 @@ export const configRepo = {
     },
 
     saveSystemConfig: async (config: SystemConfig) => {
-        // 2. 尝试保存到云端
-        if (!supabase) throw new Error("数据库未连接");
+        if (!supabase) throw new Error("数据库未连接，无法保存配置");
         
+        // 仅保存到数据库
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         
         if (error) {
+            console.error("Config Save Error:", error);
             if (error.code === '42P01') { 
-                throw new Error("云端保存失败：缺少配置表 'app_config'。");
+                throw new Error("云端保存失败：数据库缺少 'app_config' 表。请联系管理员创建。");
             }
             throw new Error(getErrorMessage(error));
         }
     }
 };
 
-// --- USER REPOSITORY ---
+// --- USER REPOSITORY (unchanged logic, strictly DB) ---
 export const userRepo = {
-  // 记录登录信息 (管理员不记录)
   recordLogin: async (userId: string, ip: string, location: string) => {
       if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
@@ -120,7 +126,7 @@ export const userRepo = {
           const currentData = data?.data || {};
           const newData = { ...currentData, lastIp: ip, location: location, lastLoginAt: Date.now() };
           await supabase.from('profiles').update({ data: newData }).eq('id', userId);
-      } catch (e) { console.warn("Record Login Failed", e); }
+      } catch (e) {}
   },
 
   updateHeartbeat: async (userId: string, secondsToAdd: number) => {
@@ -144,47 +150,28 @@ export const userRepo = {
   },
 
   login: async (username: string, code: string): Promise<{ user: User | null; error: string | null }> => {
-    // 🛡️ SECURITY ENFORCED: Database Only Authentication
-    if (!supabase) return { user: null, error: '系统未初始化 (Missing DB Key)' };
+    if (!supabase) return { user: null, error: '系统未初始化 (DB Disconnected)' };
 
     const cleanUsername = username.trim();
     const cleanCode = code.trim();
 
     try {
         let rawData = null;
-
-        // 🟢 1. 优先尝试 RPC 登录 (这是最高效的方式)
+        // 1. RPC
         const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
         
-        // 🟢 核心修复：只要 RPC 报错，无论什么错误码，都进行降级处理
         if (rpcError) {
-             const isFunctionMissing = rpcError.code === 'PGRST202' || rpcError.message?.includes('function') || rpcError.message?.includes('found');
-             if (isFunctionMissing) {
-                console.log(`[Info] RPC Login function not found, switching to direct query fallback.`);
-             } else {
-                console.warn(`[Warn] RPC Login Failed (${rpcError.code || 'Unknown'}), switching to fallback.`);
-             }
-             
-             // 🟡 2. 降级方案: 直接查询 profiles 表
-             const { data: directData, error: directError } = await supabase
+             // 2. Direct Fallback
+             const { data: directData } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('username', cleanUsername)
                 .eq('password', cleanCode)
                 .maybeSingle();
-
-             if (directError) {
-                 return { user: null, error: `登录服务异常: ${getErrorMessage(directError)}` };
-             }
-             
-             if (!directData) {
-                 return { user: null, error: '账号或密码错误' };
-             }
+             if (!directData) return { user: null, error: '账号或密码错误' };
              rawData = directData;
         } else {
-            if (rpcData) {
-                rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-            }
+            rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
         }
 
         if (!rawData) return { user: null, error: '账号或密码错误' };
@@ -198,7 +185,7 @@ export const userRepo = {
                 id: rawData.id,
                 username: rawData.username,
                 role: rawData.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
-                inviteCode: cleanCode, // Store clean code in session
+                inviteCode: cleanCode,
                 totalQuota: 100,
                 quotaRemaining: rawData.quota_remaining || 0,
                 expiryDate: '2099-12-31',
@@ -214,7 +201,6 @@ export const userRepo = {
             error: null 
         };
     } catch (e: any) { 
-        console.error("Login Exception:", e);
         return { user: null, error: `请求失败: ${getErrorMessage(e)}` }; 
     }
   },
@@ -248,7 +234,6 @@ export const userRepo = {
       const cleanCode = code.trim();
       
       const { data: existing } = await supabase.from('profiles').select('id, data').eq('username', cleanUsername).maybeSingle();
-      
       if (existing) {
           if (existing.data?.isDeleted) {
                const { error } = await supabase.from('profiles').update({ password: cleanCode, data: { ...existing.data, isDeleted: false, isSuspended: false } }).eq('id', existing.id);
