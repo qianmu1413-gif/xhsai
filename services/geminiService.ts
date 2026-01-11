@@ -147,60 +147,77 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e) { return { text: `[错误]` }; }
 };
 
-// 🟢 增强型拦截器：完美兼容 Request 对象、URL 对象和字符串
+// 🟢 终极修正版拦截器
 const createCustomFetch = (apiKey: string) => {
     return async (input: RequestInfo | URL, init?: RequestInit) => {
-        let urlStr: string;
-        let finalInit: RequestInit = init || {};
+        // 1. 提取原始 URL 和 Init 配置
+        let originalUrl: string;
+        let originalInit: RequestInit = init || {};
+        let originalRequest: Request | null = null;
 
-        // 1. 统一提取 URL 字符串
-        if (typeof input === 'string') {
-            urlStr = input;
+        if (input instanceof Request) {
+            originalRequest = input;
+            originalUrl = input.url;
+            // 如果 input 是 Request，init 可能为空，需要合并 Request 中的属性（如 body, method 等）
+            // 但 native fetch(request, init) 会自动处理覆盖。
+            // 关键在于我们需要修改 headers 和 URL。
         } else if (input instanceof URL) {
-            urlStr = input.toString();
-        } else if (typeof input === 'object' && 'url' in input) {
-            // 处理 Request 对象的情况
-            urlStr = input.url;
-            // 如果 input 是 Request 对象，我们需要继承它的配置
-            // 但通常 SDK 会传入 init，所以我们主要关注 URL 和 Headers
+            originalUrl = input.toString();
         } else {
-            urlStr = String(input);
+            originalUrl = String(input);
         }
 
-        // 2. sk- Key 特殊处理逻辑
         const isSkKey = apiKey.startsWith('sk-');
 
         if (isSkKey) {
-            const headers = new Headers(finalInit.headers || {});
-            
-            // 策略：双重保险。
-            // 许多网关支持 Authorization: Bearer，也支持 x-goog-api-key。我们都带上。
-            if (!headers.has('Authorization')) {
-                headers.set('Authorization', `Bearer ${apiKey}`);
+            // 2. URL 清洗：彻底移除 key 参数
+            try {
+                const urlObj = new URL(originalUrl);
+                if (urlObj.searchParams.has('key')) {
+                    urlObj.searchParams.delete('key');
+                    originalUrl = urlObj.toString();
+                }
+            } catch (e) {
+                console.error("URL Parse Failed", e);
             }
+
+            // 3. Header 构造
+            const headers = new Headers(originalInit.headers || (originalRequest ? originalRequest.headers : {}));
+            
+            // 移除旧的 Authentication 头部 (如果有)
+            // headers.delete('x-goog-api-key'); // 某些网关也需要这个，所以我们采用覆盖策略而不是删除
+
+            // 注入双重认证头，兼容 OneAPI/NewAPI 等大多数网关
+            headers.set('Authorization', `Bearer ${apiKey}`);
             headers.set('x-goog-api-key', apiKey);
             
             if (!headers.has('Content-Type')) {
                 headers.set('Content-Type', 'application/json');
             }
 
-            // 关键：移除 URL 中的 ?key= 参数
-            // Google 官方 API 如果收到无效的 key 参数会直接报 400，即使 Header 是对的。
-            // 既然是 sk- Key，我们假设它是给网关用的，通过 Header 传递更标准。
-            try {
-                const urlObj = new URL(urlStr);
-                if (urlObj.searchParams.has('key')) {
-                    urlObj.searchParams.delete('key');
-                    urlStr = urlObj.toString();
-                }
-            } catch (e) {
-                console.warn("[GeminiService] URL clean failed:", e);
+            // 4. 重构 Init 对象
+            // 必须创建一个新的 init 对象，确保 headers 被应用
+            const newInit: RequestInit = {
+                ...originalInit,
+                headers: headers
+            };
+
+            // 如果 input 是 Request，我们需要确保 body 等属性不丢失。
+            // 最安全的方式是：如果 input 是 Request，我们构造一个新的 Request 对象或者只传 URL string + init。
+            // 只要我们传入的是 url string，fetch 就会使用 init 中的配置。
+            // 我们还需要从 originalRequest 中提取 method, body, etc. 如果 originalInit 中没有提供。
+            
+            if (originalRequest) {
+                if (!newInit.method) newInit.method = originalRequest.method;
+                // 注意：读取 body流 可能有问题，但 Google SDK 通常在 init 中传递 body string
+                // 如果 SDK 在 init 中传了 body，我们不需要动。
             }
 
-            finalInit = { ...finalInit, headers };
+            return fetch(originalUrl, newInit);
         }
 
-        return fetch(urlStr, finalInit);
+        // 非 sk- Key，正常透传
+        return fetch(input, init);
     };
 };
 
@@ -208,10 +225,7 @@ const createCustomFetch = (apiKey: string) => {
 const cleanBaseUrl = (url: string | undefined): string | undefined => {
     if (!url || !url.trim()) return undefined;
     let clean = url.trim();
-    
-    // 仅移除末尾斜杠，保留用户输入的所有路径信息
     if (clean.endsWith('/')) clean = clean.slice(0, -1);
-    
     return clean;
 };
 
@@ -231,18 +245,20 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
     
     if (!apiKey) throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
 
-    // 安全检查：如果是 sk- Key 且没有 BaseURL，通常意味着配置错误
-    if (apiKey.startsWith('sk-') && (!baseUrl || baseUrl.includes('googleapis.com'))) {
-        console.warn("⚠️ 警告: 检测到 sk- Key 但未配置第三方 Base URL，请求可能会失败。");
+    // 关键修复：确保使用 sk- Key 时 baseUrl 被正确应用
+    // 如果用户使用了 sk- Key 但没有填 BaseURL，我们会给出一个明显的警告，并尝试不做任何修改（因为无处可发）
+    // SDK 默认指向 googleapis.com，这会导致 400 错误。
+    if (apiKey.startsWith('sk-') && !baseUrl) {
+        throw new Error("配置错误：使用 'sk-' 开头的 Key 时，必须填写 Base URL (网关地址)。");
     }
 
-    // 使用清洗后的 BaseURL
     const finalBaseUrl = cleanBaseUrl(baseUrl);
 
     return new GoogleGenAI({ 
         apiKey: apiKey,
-        baseUrl: finalBaseUrl,
-        fetch: createCustomFetch(apiKey) // 注入稳健的拦截器
+        // 如果 baseUrl 存在则使用，否则 SDK 默认使用 Google 官方地址
+        ...(finalBaseUrl ? { baseUrl: finalBaseUrl } : {}),
+        fetch: createCustomFetch(apiKey) 
     });
 };
 
@@ -322,8 +338,8 @@ export const streamExpertGeneration = async (
     } catch (e: any) {
         // 优化错误提示，指导用户修复配置
         let errorMsg = e.message;
-        if (errorMsg.includes('400') && errorMsg.includes('API key not valid')) {
-            errorMsg = "API Key 无效 (400)。请检查：\n1. 如果使用 'sk-' Key，请务必在后台配置正确的 Base URL (第三方网关地址)。\n2. 确保 Base URL 不包含 'googleapis.com'。";
+        if (errorMsg.includes('400') && (errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_ARGUMENT'))) {
+            errorMsg = "API Key 无效 (400)。\n【重要提示】您使用的是 'sk-' Key，但请求被发往了 Google 官方服务器，导致被拒。\n请务必在后台配置正确的 Base URL (第三方网关地址)，并且该地址不能是 googleapis.com。";
         }
         return { dialogueText: `生成出错: ${errorMsg}`, thought: "", notes: [] };
     }
@@ -363,14 +379,11 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 export const testConnection = async (inputConfig?: SystemConfig) => {
     try {
         const ai = await getAIClient(inputConfig);
-        // 使用用户指定的模型进行测试，而不是写死
         const modelName = inputConfig?.gemini?.model || 'gemini-3-flash-preview';
 
-        // 🟢 修复：移除 thinkingConfig，因为非 Gemini-3 模型不支持此参数，会导致 400 错误
         const response = await ai.models.generateContent({
             model: modelName,
             contents: 'ping',
-            // config: { thinkingConfig: { thinkingBudget: 0 } } // 已移除
         });
         
         return { success: !!response.text, message: response.text ? `✅ 连接成功` : "❌ 收到空响应" };
@@ -379,7 +392,7 @@ export const testConnection = async (inputConfig?: SystemConfig) => {
         let msg = e.message || "未知错误";
         // 智能错误诊断
         if (msg.includes('400') || msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
-            msg = `[400 认证失败] Key 或参数无效。\n⚠️ 重点检查：\n1. sk- Key 必须配合 Base URL (网关) 使用。\n2. Base URL 是否为空？\n3. 如果是官方 Google Key，请留空 Base URL。`;
+            msg = `[400 认证失败] Key 或参数无效。\n如果使用 'sk-' Key，请检查 Base URL 是否已填写，且不是 Google 官方地址。`;
         } else if (msg.includes('404')) {
             msg = `[404 路径错误] 模型未找到。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
         } else if (msg.includes('Failed to fetch')) {
