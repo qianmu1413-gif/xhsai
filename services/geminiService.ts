@@ -1,5 +1,5 @@
 
-import { FidelityMode, PersonaAnalysis, BulkNote, AttachedFile } from "../types";
+import { FidelityMode, PersonaAnalysis, BulkNote, AttachedFile, SystemConfig } from "../types";
 import { configRepo } from "./repository";
 import { ANALYSIS_SYSTEM_PROMPT } from "../constants";
 import mammoth from "mammoth";
@@ -226,29 +226,32 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     }
 };
 
-const getAIClient = async () => {
-    const config = await configRepo.getSystemConfig();
-    
-    // configRepo 已经处理了从 DB 或 LocalStorage 读取的逻辑
-    const apiKey = config.gemini.apiKey;
-    let baseUrl = config.gemini.baseUrl;
-    
-    if (!baseUrl || baseUrl.trim() === "") {
-        baseUrl = undefined;
-        console.log("%c[Gemini] Mode: DEFAULT GOOGLE API", "color: orange; font-weight: bold;");
+const getAIClient = async (overrideConfig?: SystemConfig) => {
+    let apiKey: string;
+    let baseUrl: string;
+
+    if (overrideConfig) {
+        // 🟢 优先使用传入的配置（通常是测试连接时输入框里的值）
+        apiKey = overrideConfig.gemini.apiKey;
+        baseUrl = overrideConfig.gemini.baseUrl;
+        console.log(`[Gemini] Mode: TESTING INPUT | Key: ${apiKey?.substring(0,4)}... | URL: ${baseUrl || 'Default'}`);
     } else {
-        // Log masked key for debugging
-        const maskedKey = apiKey ? `${apiKey.substring(0,4)}...${apiKey.substring(apiKey.length-4)}` : 'EMPTY';
-        console.log(`%c[Gemini] Mode: CUSTOM GATEWAY (${baseUrl}) | Key: ${maskedKey}`, "color: cyan; font-weight: bold;");
+        // 正常流程：从 Repo 读取
+        const config = await configRepo.getSystemConfig();
+        apiKey = config.gemini.apiKey;
+        baseUrl = config.gemini.baseUrl;
     }
+    
+    // 清洗 BaseURL: 如果是空字符串，设为 undefined 从而使用 Google 默认
+    const finalBaseUrl = (baseUrl && baseUrl.trim() !== "") ? baseUrl : undefined;
 
     if (!apiKey) {
-        throw new Error("未检测到 API Key。请在系统设置中配置 Gemini API Key。");
+        throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
     }
 
     return new GoogleGenAI({ 
         apiKey: apiKey,
-        baseUrl: baseUrl 
+        baseUrl: finalBaseUrl 
     });
 };
 
@@ -455,9 +458,13 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
     }
 };
 
-export const testConnection = async () => {
+/**
+ * 测试连接状态
+ * @param overrideConfig 可选：传入该参数时，将使用该参数中的 key/url 进行测试，而不使用保存的配置。
+ */
+export const testConnection = async (overrideConfig?: SystemConfig) => {
     try {
-        const ai = await getAIClient();
+        const ai = await getAIClient(overrideConfig);
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: 'ping',
@@ -466,8 +473,16 @@ export const testConnection = async () => {
         return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
     } catch (e: any) {
         let msg = e.message || "连接发生未知错误";
+        // 增加更友好的错误提示，并回显部分 Key 以便调试
+        let keyHint = "";
+        if (overrideConfig?.gemini?.apiKey) {
+            keyHint = ` (使用 Key: ${overrideConfig.gemini.apiKey.substring(0, 4)}...)`;
+        }
+        
         if (msg.includes('400') || msg.includes('API key not valid')) {
-            msg = "API Key 无效或不被该网关接受 (400)。请检查 Base URL 和 Key 是否匹配。";
+            msg = `API Key 无效或不被该网关接受 (400)。请检查 Base URL 和 Key 是否匹配。${keyHint}`;
+        } else if (msg.includes('Failed to fetch')) {
+             msg = `网络请求失败。请检查 Base URL 是否正确，或者该网关是否需要科学上网。`;
         }
         return { success: false, message: msg };
     }

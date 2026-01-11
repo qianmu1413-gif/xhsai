@@ -68,38 +68,24 @@ const DEFAULT_CONFIG: SystemConfig = {
 export const configRepo = {
     getSystemConfig: async (): Promise<SystemConfig> => {
         let dbConfig: any = null;
-        let localConfig: any = null;
 
-        // 1. 优先尝试从云端数据库加载
+        // 1. 严格只从云端数据库加载
         if (supabase) {
             try {
                 const { data, error } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
                 if (!error && data?.value) {
                     dbConfig = data.value;
-                    console.debug("[Config] Loaded from Database (Source of Truth)");
                 }
             } catch (e) { console.warn("Cloud Config Load Warning:", e); }
         }
 
-        // 2. 加载本地缓存 (Fallback)
-        if (typeof localStorage !== 'undefined') {
-            try {
-                const local = localStorage.getItem('rednote_sys_config');
-                if (local) {
-                    localConfig = JSON.parse(local);
-                }
-            } catch(e) {}
-        }
-
-        // 3. 深度合并逻辑：数据库配置 > 本地配置 > 默认配置
-        // 🚨 修正优先级：确保 DB 配置覆盖本地配置。
-        // 之前的逻辑是 ...(dbConfig || {}), ...(localConfig || {}) 导致本地覆盖了云端。
-        // 现在改为 ...(localConfig || {}), ...(dbConfig || {}) 确保云端是最高优先级。
+        // 2. 深度合并逻辑：数据库配置 > 默认配置
+        // ❌ 彻底移除本地缓存读取逻辑
         
-        const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(localConfig?.gemini || {}), ...(dbConfig?.gemini || {}) };
-        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(localConfig?.xhs || {}), ...(dbConfig?.xhs || {}) };
-        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(localConfig?.publish || {}), ...(dbConfig?.publish || {}) };
-        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(localConfig?.cos || {}), ...(dbConfig?.cos || {}) };
+        const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(dbConfig?.gemini || {}) };
+        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}) };
+        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}) };
+        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(dbConfig?.cos || {}) };
 
         return {
             gemini: mergedGemini,
@@ -110,21 +96,14 @@ export const configRepo = {
     },
 
     saveSystemConfig: async (config: SystemConfig) => {
-        // 1. 总是先保存到本地作为备份
-        if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('rednote_sys_config', JSON.stringify(config));
-        }
-
         // 2. 尝试保存到云端
-        if (!supabase) throw new Error("数据库未连接 (配置已保存至本地)");
+        if (!supabase) throw new Error("数据库未连接");
         
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         
         if (error) {
-            // 如果是表不存在的错误，给予友好提示，但不要阻断流程（因为本地已经保存了）
-            if (error.code === '42P01') { // PostgreSQL code for undefined_table
-                console.warn("Table 'app_config' missing. Configuration saved locally only.");
-                throw new Error("云端保存失败：缺少配置表。但配置已在本地生效，您可以继续使用。");
+            if (error.code === '42P01') { 
+                throw new Error("云端保存失败：缺少配置表 'app_config'。");
             }
             throw new Error(getErrorMessage(error));
         }

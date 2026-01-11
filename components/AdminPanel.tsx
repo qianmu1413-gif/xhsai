@@ -84,7 +84,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   const loadConfig = async () => {
       const cfg = await configRepo.getSystemConfig();
       setSysConfig(cfg);
-      checkAI();
+      // 加载时先不自动检测，避免弹出一堆错误，等待用户手动测试或操作
   };
 
   const refreshUserList = async () => {
@@ -112,8 +112,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   };
 
   const checkAI = async () => {
-    setSysStatus({ loading: true, message: "正在检测网关..." });
-    const res = await testConnection();
+    setSysStatus({ loading: true, message: "正在检测..." });
+    // 🟢 关键修复：传入当前的 sysConfig 状态，确保测试的是输入框里的值，而不是保存的值
+    const res = await testConnection(sysConfig);
     setSysStatus({ loading: false, message: res.success ? "连接正常" : res.message, success: res.success });
   };
 
@@ -122,16 +123,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
       try {
           await configRepo.saveSystemConfig(sysConfig);
           showToast("系统配置已更新");
+          // 保存成功后再次测试，确保环境一致
           checkAI();
       } catch (e: any) {
-          // 即使云端保存失败，本地也已更新，所以仍可提示部分成功或具体错误
           const msg = getErrorMessage(e);
-          if (msg.includes('本地')) {
-              showToast(msg, 'info'); // 降级提示
-              checkAI(); // 依然尝试检查连接，因为本地配置已生效
-          } else {
-              showToast(`配置保存异常: ${msg}`, 'error');
-          }
+          showToast(`配置保存异常: ${msg}`, 'error');
       } finally {
           setIsSavingConfig(false);
           setShowConfigModal(false);
