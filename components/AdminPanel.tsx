@@ -40,7 +40,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
 
   // System Config State
   const [sysConfig, setSysConfig] = useState<SystemConfig>({
-      gemini: { apiKey: "", baseUrl: "", model: "" },
+      gemini: { apiKey: "", baseUrl: "", model: "gemini-3-flash-preview" },
       xhs: { apiKey: "", apiUrl: "" },
       cos: { secretId: "", secretKey: "", bucket: "", region: "" },
       publish: { apiKey: "" }
@@ -68,7 +68,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   useEffect(() => {
     loadConfig();
     refreshUserList();
-    // 🟢 性能优化：将轮询间隔从 30s 增加到 120s，减少数据库读取压力
     const interval = setInterval(refreshUserList, 120000);
     return () => clearInterval(interval);
   }, []);
@@ -84,7 +83,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   const loadConfig = async () => {
       const cfg = await configRepo.getSystemConfig();
       setSysConfig(cfg);
-      // 加载时先不自动检测，避免弹出一堆错误，等待用户手动测试或操作
   };
 
   const refreshUserList = async () => {
@@ -112,10 +110,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   };
 
   const checkAI = async () => {
-    setSysStatus({ loading: true, message: "正在检测..." });
-    // 🟢 关键修复：传入当前的 sysConfig 状态，确保测试的是输入框里的值，而不是保存的值
+    setSysStatus({ loading: true, message: "正在握手...", success: undefined });
+    // IMPORTANT: Pass current UI state (sysConfig), not database state, to test what the user just typed.
     const res = await testConnection(sysConfig);
-    setSysStatus({ loading: false, message: res.success ? "连接正常" : res.message, success: res.success });
+    setSysStatus({ loading: false, message: res.message, success: res.success });
   };
 
   const saveConfig = async () => {
@@ -123,8 +121,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
       try {
           await configRepo.saveSystemConfig(sysConfig);
           showToast("系统配置已更新");
-          // 保存成功后再次测试，确保环境一致
-          checkAI();
       } catch (e: any) {
           const msg = getErrorMessage(e);
           showToast(`配置保存异常: ${msg}`, 'error');
@@ -171,7 +167,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   const executeDeleteUser = async (id: string, username: string) => { 
       setDeletingIds(prev => new Set(prev).add(id));
       showToast("正在执行销毁程序...", 'info');
-      
       try {
           const result = await userRepo.deleteUser(id);
           if (result.success) {
@@ -270,167 +265,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
           </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex gap-6 overflow-hidden relative z-10">
-          
-          {/* User Table Section */}
-          <div className="flex-1 flex flex-col bg-slate-900/60 border border-slate-800 rounded-2xl backdrop-blur-sm overflow-hidden shadow-2xl">
-              <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-                  <div className="flex gap-6">
-                      <button onClick={() => setViewMode('active')} className={`text-xs font-bold flex items-center gap-2 pb-1 border-b-2 transition-all ${viewMode === 'active' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
-                          <ShieldCheck size={14}/> 活跃用户
-                      </button>
-                      <button onClick={() => setViewMode('graveyard')} className={`text-xs font-bold flex items-center gap-2 pb-1 border-b-2 transition-all ${viewMode === 'graveyard' ? 'border-red-500 text-red-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
-                          <Skull size={14}/> 数据墓地
-                      </button>
-                  </div>
-                  <button onClick={refreshUserList} className="text-slate-500 hover:text-white transition-colors bg-slate-800 p-1.5 rounded-lg"><RefreshCcw size={14}/></button>
-              </div>
-              
-              <div className="flex-1 overflow-auto custom-scrollbar">
-                  <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-900/80 sticky top-0 z-10 text-[11px] text-slate-500 font-semibold tracking-wider">
-                          <tr>
-                              <th className="px-6 py-3 pl-8">用户标识</th>
-                              <th className="px-6 py-3">最近活动 (IP)</th>
-                              <th className="px-6 py-3">在线时长</th>
-                              <th className="px-6 py-3">状态</th>
-                              <th className="px-6 py-3 text-right pr-8">管理操作</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/50 text-sm">
-                          {loadingUsers ? (
-                              <tr><td colSpan={5} className="text-center py-20 text-slate-500"><Loader2 size={24} className="animate-spin mx-auto mb-3 text-indigo-500"/> 读取数据中...</td></tr>
-                          ) : displayUsers.length === 0 ? (
-                              <tr><td colSpan={5} className="text-center py-20 text-slate-600 font-medium">暂无数据记录</td></tr>
-                          ) : displayUsers.map(u => (
-                              <tr key={u.id} className="hover:bg-slate-800/30 transition-colors group cursor-pointer" onClick={() => setInspectingUser(u.id)}>
-                                  <td className="px-6 py-4 pl-8">
-                                      <div className="flex items-center gap-3">
-                                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${u.isSuspended ? 'bg-red-500/10 text-red-500' : 'bg-indigo-500/10 text-indigo-400'}`}>
-                                              {u.username.substring(0,1).toUpperCase()}
-                                          </div>
-                                          <div>
-                                              <div className={`font-bold ${u.isSuspended ? 'text-red-400 line-through' : 'text-slate-200'}`}>{u.username}</div>
-                                              <div className="text-[10px] text-slate-500 font-mono">{u.role === 'ADMIN' ? '超级管理员' : '普通用户'}</div>
-                                          </div>
-                                      </div>
-                                  </td>
-                                  <td className="px-6 py-4 text-slate-400 text-xs font-mono">
-                                      <div className="flex items-center gap-1.5">
-                                          <Globe size={12} className="text-slate-600" /> {u.lastIp || '未知'}
-                                      </div>
-                                  </td>
-                                  <td className="px-6 py-4 text-slate-400 text-xs font-mono">
-                                      {formatDuration(u.totalOnlineSeconds || 0)}
-                                  </td>
-                                  <td className="px-6 py-4">
-                                      {u.isDeleted ? (
-                                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-950/30 text-red-500 border border-red-900/30">
-                                              <Ghost size={10}/> 已销毁
-                                          </span>
-                                      ) : (
-                                          u.isSuspended ? (
-                                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-950/30 text-amber-500 border border-amber-900/30">已停用</span>
-                                          ) : (
-                                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-950/30 text-emerald-500 border border-emerald-900/30">
-                                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 正常
-                                              </span>
-                                          )
-                                      )}
-                                  </td>
-                                  <td className="px-6 py-4 text-right pr-8">
-                                      <div className="flex items-center justify-end gap-2 opacity-60 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                                          <button onClick={() => onImpersonate(u)} className="p-1.5 bg-slate-800 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors border border-slate-700" title="控制台接管"><Terminal size={14}/></button>
-                                          <button onClick={() => setInspectingUser(u.id)} className={`p-1.5 border rounded-lg transition-colors ${inspectingUser === u.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-transparent text-slate-400 border-slate-700 hover:border-slate-500'}`} title="数据透视"><Eye size={14}/></button>
-                                          {u.role !== 'ADMIN' && !u.isDeleted && (
-                                              <>
-                                                <button onClick={() => { setEditingUser(u); setEditForm({username:u.username, password:u.inviteCode}); }} className="p-1.5 hover:bg-slate-800 text-slate-400 rounded-lg"><Edit size={14}/></button>
-                                                <button onClick={() => toggleSuspend(u)} className={`p-1.5 rounded-lg ${u.isSuspended ? 'text-emerald-500 hover:bg-emerald-950/30' : 'text-amber-500 hover:bg-amber-950/30'}`}>{u.isSuspended ? <PlayCircle size={14}/> : <PauseCircle size={14}/>}</button>
-                                                <button 
-                                                    onClick={() => confirmAction(`确定要销毁用户 "${u.username}" 吗？\n所有数据将移入墓地，且用户无法再登录。`, () => executeDeleteUser(u.id, u.username))}
-                                                    disabled={deletingIds.has(u.id)}
-                                                    className={`p-1.5 transition-all rounded-lg ${deletingIds.has(u.id) ? 'text-red-800' : 'text-red-500 hover:bg-red-950/30'}`}
-                                                >
-                                                    {deletingIds.has(u.id) ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14}/>}
-                                                </button>
-                                              </>
-                                          )}
-                                      </div>
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-
-          {/* Asset Inspector (Side Panel) */}
-          <div className={`w-96 bg-slate-900 border-l border-slate-800 flex flex-col transition-all duration-500 ease-in-out ${inspectingUser ? 'translate-x-0 opacity-100' : 'translate-x-full hidden opacity-0'}`}>
-              <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
-                  <h3 className="text-xs font-bold text-white flex items-center gap-2"><HardDrive size={14} className="text-indigo-500"/> 数据透视 (God Mode)</h3>
-                  <button onClick={() => setInspectingUser(null)}><X size={16} className="text-slate-500 hover:text-white transition-colors"/></button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar bg-slate-900/50">
-                  {!inspectingUser ? (
-                      <div className="text-center py-20 text-slate-700 text-xs">选择左侧用户以查看数据</div>
-                  ) : (
-                      <>
-                        <div className="animate-fade-in">
-                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-3 flex justify-between tracking-wider">
-                                <span>人设模型 (Personas)</span>
-                                <span className="bg-slate-800 text-slate-400 px-1.5 rounded">{userAssets.personas.length}</span>
-                            </div>
-                            <div className="space-y-2">
-                                {userAssets.personas.map((p, i) => (
-                                    <div key={i} className="bg-slate-800/50 border border-slate-700/50 p-3 rounded-xl hover:border-indigo-500/50 transition-colors">
-                                        <div className="font-bold text-slate-200 text-xs mb-1">{p.tone}</div>
-                                        <div className="text-[10px] text-slate-500 truncate">{p.keywords?.join(' · ')}</div>
-                                    </div>
-                                ))}
-                                {userAssets.personas.length === 0 && <div className="text-center text-[10px] text-slate-600 py-4 border border-dashed border-slate-800 rounded-xl">无数据</div>}
-                            </div>
-                        </div>
-
-                        <div className="animate-fade-in delay-75">
-                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-3 flex justify-between tracking-wider">
-                                <span>成品笔记 (Finished)</span>
-                                <span className="bg-slate-800 text-slate-400 px-1.5 rounded">{userAssets.finished.length}</span>
-                            </div>
-                            <div className="space-y-2">
-                                {userAssets.finished.map((n: any, i) => (
-                                    <div key={i} className={`bg-slate-800/50 border border-slate-700/50 p-3 rounded-xl text-xs relative group ${n.isDeleted ? 'opacity-50 grayscale' : ''}`}>
-                                        {n.isDeleted && <div className="absolute top-2 right-2 bg-red-950 text-red-500 text-[8px] px-1.5 py-0.5 rounded font-bold">已删</div>}
-                                        <div className="font-bold text-slate-200 truncate pr-8">{n.title || '未命名'}</div>
-                                        <div className="text-[10px] text-slate-500 mt-1">{new Date(n.publishedAt || n.createdAt).toLocaleDateString()}</div>
-                                        
-                                        <button onClick={() => { navigator.clipboard.writeText(n.content); showToast("内容已复制"); }} className="absolute bottom-3 right-3 text-slate-600 hover:text-indigo-400 opacity-0 group-hover:opacity-100 transition-all bg-slate-900 p-1.5 rounded-lg border border-slate-700"><Copy size={12}/></button>
-                                    </div>
-                                ))}
-                                {userAssets.finished.length === 0 && <div className="text-center text-[10px] text-slate-600 py-4 border border-dashed border-slate-800 rounded-xl">无数据</div>}
-                            </div>
-                        </div>
-                        
-                        <div className="animate-fade-in delay-100">
-                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-3 flex justify-between tracking-wider">
-                                <span>媒体资产 (Assets)</span>
-                                <span className="bg-slate-800 text-slate-400 px-1.5 rounded">{userAssets.assets.length}</span>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                                {userAssets.assets.filter(a => a.type === 'image').map((img: any, i) => (
-                                    <div key={i} className="aspect-square bg-slate-800 rounded-lg relative group overflow-hidden border border-slate-700/50">
-                                        <img src={img.data || img.url} className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity"/>
-                                        {img.isDeleted && <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-red-500 text-[8px] font-bold backdrop-blur-sm">DEL</div>}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                      </>
-                  )}
-              </div>
-          </div>
-      </div>
-
       {/* Config Modal */}
       {showConfigModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in">
@@ -448,19 +282,27 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                               <div>
                                   <div className="flex justify-between items-center mb-1.5">
                                       <label className="text-xs font-medium text-slate-400">Gateway Status</label>
-                                      <span className={`text-[10px] px-2 py-0.5 rounded ${sysStatus.success ? 'bg-emerald-950 text-emerald-500' : 'bg-slate-800 text-slate-500'}`}>{sysStatus.message}</span>
+                                      {sysStatus.success === true && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-500 border border-emerald-900/30">✓ 连接成功</span>}
+                                      {sysStatus.success === false && <span className="text-[10px] px-2 py-0.5 rounded bg-red-950 text-red-500 border border-red-900/30">× 连接失败</span>}
                                   </div>
+                                  {/* Status Message Area */}
+                                  {sysStatus.message && (
+                                    <div className={`text-[10px] px-3 py-2 rounded-lg leading-relaxed font-mono whitespace-pre-wrap ${sysStatus.success === false ? 'bg-red-950/20 text-red-400 border border-red-900/20' : 'bg-slate-900 text-slate-500'}`}>
+                                        {sysStatus.message}
+                                    </div>
+                                  )}
                               </div>
                               
                               <div className="space-y-4">
                                   <div>
                                       <label className="text-xs font-medium text-slate-400 block mb-1.5">API Key (Gemini)</label>
                                       <input type="password" value={sysConfig.gemini.apiKey} onChange={e => updateConfig('gemini', 'apiKey', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all placeholder:text-slate-700" placeholder="sk-..." />
+                                      <p className="text-[10px] text-slate-600 mt-1">支持 Google 官方 Key 或第三方网关 Key (sk-...)</p>
                                   </div>
                                   <div className="grid grid-cols-2 gap-4">
                                       <div>
                                           <label className="text-xs font-medium text-slate-400 block mb-1.5">Base URL (网关地址)</label>
-                                          <input type="text" value={sysConfig.gemini.baseUrl} onChange={e => updateConfig('gemini', 'baseUrl', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all" />
+                                          <input type="text" value={sysConfig.gemini.baseUrl} onChange={e => updateConfig('gemini', 'baseUrl', e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 font-mono transition-all placeholder:text-slate-700" placeholder="https://..." />
                                       </div>
                                       <div>
                                           <label className="text-xs font-medium text-slate-400 block mb-1.5">Model (模型版本)</label>
@@ -469,8 +311,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                   </div>
                               </div>
                               
-                              <div className="flex justify-end">
-                                  <button onClick={checkAI} className="text-[10px] flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors">
+                              <div className="flex justify-end pt-2">
+                                  <button onClick={checkAI} className="text-[10px] flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors border border-slate-700 hover:border-slate-500">
                                       {sysStatus.loading ? <Loader2 size={12} className="animate-spin"/> : <RefreshCcw size={12}/>} 测试连接
                                   </button>
                               </div>

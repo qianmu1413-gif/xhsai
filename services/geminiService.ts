@@ -147,34 +147,43 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e) { return { text: `[错误]` }; }
 };
 
-// 🟢 终极修复：Custom Fetch Interceptor
-// 劫持 SDK 的所有网络请求，强制修正 Header
+// 🟢 终极修复：自定义请求拦截器 (The "Surgical" Fetch)
+// 1. 强制清理 URL 参数中的 key
+// 2. 强制使用 Bearer Token
+// 3. 自动修复路径版本重复 (v1/v1beta)
 const createCustomFetch = (apiKey: string) => {
     return async (url: RequestInfo | URL, init?: RequestInit) => {
-        let fetchUrl = url.toString();
-        let fetchInit = init || {};
+        let fetchUrlStr = url.toString();
+        const fetchInit = init || {};
         
-        // 1. 如果是 sk- Key，强制注入 Bearer Token
-        if (apiKey.startsWith('sk-')) {
-            const headers = new Headers(fetchInit.headers || {});
-            
-            // 移除 Google 默认的 Header，防止网关冲突
-            headers.delete('x-goog-api-key');
-            
-            // 注入 Bearer
-            headers.set('Authorization', `Bearer ${apiKey}`);
-            
-            fetchInit.headers = headers;
+        // 判断是否为 "sk-" 开头的 Key
+        const isSkKey = apiKey.startsWith('sk-');
 
-            // 2. 清洗 URL：移除查询参数中的 key=... (避免重复传递)
-            if (fetchUrl.includes('key=')) {
-                fetchUrl = fetchUrl.replace(/([?&])key=[^&]*(&|$)/, '$1').replace(/[?&]$/, '');
+        if (isSkKey) {
+            // A. 清除 URL 参数
+            const urlObj = new URL(fetchUrlStr);
+            urlObj.searchParams.delete('key'); 
+            fetchUrlStr = urlObj.toString();
+
+            // B. 路径修正：如果 BaseURL 包含 /v1 且 SDK 加了 /v1beta，则替换为 /v1
+            if (fetchUrlStr.includes('/v1/v1beta/')) {
+                fetchUrlStr = fetchUrlStr.replace('/v1/v1beta/', '/v1/');
             }
+            // 某些网关可能不需要 v1beta，直接是 /models
+            // 如果你发现还是 404，可以尝试取消下面这行的注释
+            // fetchUrlStr = fetchUrlStr.replace('/v1beta/', '/v1/');
+
+            // C. Header 重构
+            const headers = new Headers(fetchInit.headers || {});
+            headers.delete('x-goog-api-key'); // 移除 Google 头
+            headers.set('Authorization', `Bearer ${apiKey}`); // 注入 Bearer
+            headers.set('Content-Type', 'application/json'); // 确保类型
+
+            fetchInit.headers = headers;
         }
 
-        // console.log(`[Gemini Interceptor] ${fetchInit.method} -> ${fetchUrl}`);
-        
-        return fetch(fetchUrl, fetchInit);
+        // console.log(`[Gemini Request] ${fetchInit.method} ${fetchUrlStr}`);
+        return fetch(fetchUrlStr, fetchInit);
     };
 };
 
@@ -185,24 +194,18 @@ const getAIClient = async (overrideConfig?: SystemConfig) => {
     if (overrideConfig) {
         apiKey = overrideConfig.gemini.apiKey;
         baseUrl = overrideConfig.gemini.baseUrl;
-        console.log(`[Gemini] Mode: INPUT TEST | KeyType: ${apiKey?.startsWith('sk-') ? 'Proxy(sk-)' : 'Google'} | URL: ${baseUrl || 'Default'}`);
+        console.log(`[Gemini] Test Mode: Key=${apiKey?.substring(0,4)}... URL=${baseUrl}`);
     } else {
         const config = await configRepo.getSystemConfig();
         apiKey = config.gemini.apiKey;
         baseUrl = config.gemini.baseUrl;
     }
     
-    // 清洗 BaseURL
+    if (!apiKey) throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
+
     let finalBaseUrl = (baseUrl && baseUrl.trim() !== "") ? baseUrl.trim() : undefined;
-    if (finalBaseUrl && finalBaseUrl.endsWith('/')) {
-        finalBaseUrl = finalBaseUrl.slice(0, -1);
-    }
+    if (finalBaseUrl && finalBaseUrl.endsWith('/')) finalBaseUrl = finalBaseUrl.slice(0, -1);
 
-    if (!apiKey) {
-        throw new Error("API Key 为空。请在设置中填入 Gemini API Key。");
-    }
-
-    // 🟢 使用自定义 Fetch 劫持请求，确保兼容 OneAPI/VectorEngine
     return new GoogleGenAI({ 
         apiKey: apiKey,
         baseUrl: finalBaseUrl,
@@ -223,7 +226,6 @@ export const analyzeMaterials = async (files: AttachedFile[]): Promise<string> =
     } catch (e: any) { return `错误: ${e.message}`; }
 };
 
-// ... (Note parsing logic unchanged) ...
 const parseBulkNotes = (text: string): BulkNote[] => {
     const notes: BulkNote[] = [];
     const parts = text.split(/###\s*(?:方案|笔记|Version)\s*\d+/i);
@@ -316,27 +318,26 @@ export const streamPersonaAnalysis = async (samples: string, onToken: (text: str
 
 export const testConnection = async (inputConfig?: SystemConfig) => {
     try {
-        // 1. 使用我们增强过的 Client (已包含拦截器)
         const ai = await getAIClient(inputConfig);
-        
-        // 尝试 Ping，禁用 thinking 以加快速度
+        const modelName = inputConfig?.gemini?.model || 'gemini-3-flash-preview';
+
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: modelName,
             contents: 'ping',
             config: { thinkingConfig: { thinkingBudget: 0 } }
         });
         
-        return { success: !!response.text, message: response.text ? "连接正常" : "收到空响应" };
+        return { success: !!response.text, message: response.text ? `✅ 连接成功: ${response.text.substring(0, 10)}...` : "❌ 收到空响应" };
 
     } catch (e: any) {
         let msg = e.message || "未知错误";
-        // 优化错误提示，帮助用户定位问题
-        if (msg.includes('400') || msg.includes('API key not valid')) {
-            msg = `Key 无效 (400)。\n系统已自动为您注入 Bearer Token，但网关依然拒绝。请检查 Key 是否填写正确，或者网关地址是否支持 /v1beta/models 路径。`;
+        // 智能错误诊断
+        if (msg.includes('400') || msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
+            msg = `[400 认证失败] Key 无效。\n系统已自动注入 Bearer Token 并清除 URL 参数。\n请检查 Key 是否正确，或网关是否支持 Gemini 协议。`;
         } else if (msg.includes('404')) {
-            msg = `路径不存在 (404)。\n您的 Base URL 可能不正确，或者该网关不支持 Gemini 协议。`;
+            msg = `[404 路径错误] 模型或路径不存在。\n系统已自动修正 /v1/v1beta 路径。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
         } else if (msg.includes('Failed to fetch')) {
-            msg = `网络连接失败。\n请检查 Base URL 是否可访问 (是否需要跨域/代理)。`;
+            msg = `[网络错误] 无法连接到服务器。\n请检查 Base URL (${inputConfig?.gemini?.baseUrl}) 是否正确 (CORS/网络)。`;
         }
         return { success: false, message: msg };
     }
