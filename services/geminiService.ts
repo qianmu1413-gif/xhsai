@@ -59,17 +59,18 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 
 const fetchUrlAsBlob = async (url: string): Promise<Blob> => {
     const cleanUrl = url.split('?')[0]; 
-    const timestampUrl = `${cleanUrl}?_t=${Date.now()}`; 
+    // 🟢 强力去缓存：时间戳 + 随机数
+    const timestampUrl = `${cleanUrl}?_t=${Date.now()}_${Math.random().toString(36).substring(7)}`; 
     try {
         const response = await fetch(timestampUrl, { cache: 'no-store', mode: 'cors', credentials: 'omit' }); 
         if (response.ok) return await response.blob();
     } catch (e) {}
     try {
         const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl);
+        const res = await fetch(proxyUrl, { cache: 'no-store' });
         if (res.ok) return await res.blob();
     } catch (e) {}
-    throw new Error("无法下载文件");
+    throw new Error("无法下载文件 (网络或CORS限制)");
 };
 
 const extractDocxText = async (blob: Blob): Promise<string> => {
@@ -79,29 +80,57 @@ const extractDocxText = async (blob: Blob): Promise<string> => {
             const result = await mammoth.extractRawText({ arrayBuffer });
             return result.value;
         }
-    } catch (e) { return "[DOCX 解析失败]"; }
+    } catch (e: any) { return `ERROR:DOCX_PARSE_FAILED (${e.message})`; }
     return "";
 };
 
+// 🟢 确保 Worker 可以在任何地方被注入
+const ensurePdfWorker = () => {
+    // @ts-ignore
+    if (typeof window !== 'undefined' && window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        // @ts-ignore
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+};
+
 const extractPdfText = async (blob: Blob): Promise<string> => {
+    ensurePdfWorker();
     try {
         // @ts-ignore
         if (typeof window !== 'undefined' && window.pdfjsLib) {
             const arrayBuffer = await blobToArrayBuffer(blob);
             // @ts-ignore
             const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true });
-            const pdf = await loadingTask.promise;
-            let fullText = "";
-            const maxPages = Math.min(pdf.numPages, 15);
-            for (let i = 1; i <= maxPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                fullText += `[第${i}页]: ${textContent.items.map((item: any) => item.str).join(' ')}\n`;
+            
+            try {
+                const pdf = await loadingTask.promise;
+                let fullText = "";
+                const maxPages = Math.min(pdf.numPages, 20); // Limit pages for performance
+                for (let i = 1; i <= maxPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    const pageText = textContent.items.map((item: any) => item.str).join(' ');
+                    if (pageText.trim()) {
+                        fullText += `[第${i}页]: ${pageText}\n`;
+                    }
+                }
+                
+                if (!fullText.trim()) {
+                    return "ERROR:PDF_SCANNED_OR_EMPTY";
+                }
+                return fullText;
+
+            } catch (pdfErr: any) {
+                console.error("PDF Parsing Structure Error:", pdfErr);
+                if (pdfErr.name === 'PasswordException') return "ERROR:PDF_PASSWORD_PROTECTED";
+                return `ERROR:PDF_INTERNAL (${pdfErr.message})`;
             }
-            return fullText;
         }
-    } catch (e) {}
-    return "";
+        return "ERROR:PDF_LIB_MISSING";
+    } catch (e: any) {
+        console.error("PDF Blob Error:", e);
+        return `ERROR:PDF_LOAD_FAILED (${e.message})`; 
+    }
 };
 
 // 🟢 核心：转换为 OpenAI 兼容格式的消息内容
@@ -113,25 +142,38 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
 
         if (blob) { mimeType = blob.type || mimeType; } 
         else if (file.data.startsWith('http')) {
-            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } catch (fetchErr) { return { type: "text", text: `[文件读取失败: ${file.name}]` }; }
+            try { blob = await fetchUrlAsBlob(file.data); mimeType = blob.type || mimeType; } catch (fetchErr: any) { return { type: "text", text: `[文件下载失败: ${file.name} - ${fetchErr.message}]` }; }
         }
         else if (file.data.startsWith('data:')) {
             const parts = file.data.split(',');
             base64Data = parts[1];
         }
 
-        if (!blob && !base64Data) return { type: "text", text: `[读取失败: ${file.name}]` };
+        if (!blob && !base64Data) return { type: "text", text: `[文件数据读取失败: ${file.name}]` };
 
         // 1. PDF/DOCX (OpenAI Vision 不直接支持 PDF，转为纯文本)
         if (mimeType.includes('pdf') || file.name.endsWith('.pdf')) {
             if (blob) {
                 const pdfText = await extractPdfText(blob);
-                if (pdfText && pdfText.trim().length > 20) return { type: "text", text: `[PDF内容: ${file.name}]:\n${pdfText}` };
+                
+                // 🟢 详细错误处理
+                if (pdfText.startsWith('ERROR:')) {
+                    const code = pdfText.split(':')[1];
+                    let reason = pdfText;
+                    if (code === 'PDF_SCANNED_OR_EMPTY') reason = "文件看起来是纯图片(扫描件)或无内容，无法直接提取文字";
+                    if (code === 'PDF_PASSWORD_PROTECTED') reason = "文件被密码加密";
+                    if (code === 'PDF_LIB_MISSING') reason = "PDF解析库未加载";
+                    return { type: "text", text: `[PDF解析失败: ${file.name}]\n原因: ${reason}` };
+                }
+
+                if (pdfText && pdfText.trim().length > 10) return { type: "text", text: `[PDF内容: ${file.name}]:\n${pdfText}` };
+                return { type: "text", text: `[PDF内容过短: ${file.name}]` };
             }
-            return { type: "text", text: `[PDF解析失败: ${file.name}]` };
+            return { type: "text", text: `[PDF处理错误: ${file.name}]` };
         } 
         else if (file.name.endsWith('.docx') && blob) {
             const docxText = await extractDocxText(blob);
+            if (docxText.startsWith('ERROR:')) return { type: "text", text: `[DOCX解析失败: ${file.name} - ${docxText}]` };
             return { type: "text", text: `[DOCX内容: ${file.name}]:\n${docxText}` };
         }
         // 2. Images (OpenAI Vision Format)
@@ -154,7 +196,7 @@ const prepareOpenAIPart = async (file: AttachedFile): Promise<any> => {
 
         return { type: "text", text: `[未知类型: ${file.name}]` };
 
-    } catch (e) { return { type: "text", text: `[处理错误: ${file.name}]` }; }
+    } catch (e: any) { return { type: "text", text: `[处理错误: ${file.name} - ${e.message}]` }; }
 };
 
 
