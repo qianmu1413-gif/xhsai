@@ -312,12 +312,14 @@ export const streamExpertGeneration = async (
         let parsedNotes = count > 1 ? parseBulkNotes(cleaned) : [parseSingleNote(cleaned)].filter(n => n) as BulkNote[];
         return { dialogueText: cleaned, thought: "", notes: parsedNotes };
     } catch (e: any) {
-        let errorMsg = e.message;
-        // 捕获 400 错误
-        // 400 不一定只代表 Google 官方拒绝，也可能是第三方网关因为模型名错误、参数错误拒绝的。
+        let errorMsg = e.message || "未知错误";
+        
+        // 🟢 不再掩盖真实错误，而是附加提示
+        // 400 Bad Request 可能包含 "Invalid model", "Context length exceeded", "Invalid JSON" 等关键信息
         if (errorMsg.includes('400')) {
-            errorMsg = "❌ 生成失败 (400 Bad Request)。\n可能原因：\n1. 请求发往了 Google 官方服务器 (Base URL 未生效)。\n2. 第三方网关拒绝了请求 (API Key 无效，或模型名称不支持)。\n\n请检查【系统配置】中的 Base URL 和 Model 字段。";
+             errorMsg += `\n\n💡 提示：收到 400 错误。如果是第三方网关，请检查：\n1. Base URL 是否正确 (有些网关不需要 /v1 后缀) \n2. 检查 Model 名称是否支持 \n3. 网关可能不支持 Google 协议 (需要 OpenAI 格式)`;
         }
+        
         return { dialogueText: `生成出错: ${errorMsg}`, thought: "", notes: [] };
     }
 };
@@ -362,13 +364,14 @@ export const testConnection = async (inputConfig?: SystemConfig) => {
             contents: 'ping',
         });
         
-        return { success: !!response.text, message: response.text ? `✅ 连接成功` : "❌ 收到空响应" };
+        return { success: !!response.text, message: response.text ? `✅ 连接成功: ${response.text.substring(0, 50)}` : "❌ 收到空响应" };
 
     } catch (e: any) {
         let msg = e.message || "未知错误";
+        
         // 智能错误诊断
-        if (msg.includes('400') || msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
-            msg = `[400 认证失败] Key 或参数无效。\n如果使用 'sk-' Key，请检查 Base URL 是否已填写，且不是 Google 官方地址。`;
+        if (msg.includes('400')) {
+            msg = `❌ 400 请求被拒绝。\n原文: ${msg}\n\n💡 检查: Base URL 是否正确? 模型名称是否正确?`;
         } else if (msg.includes('404')) {
             msg = `[404 路径错误] 模型未找到。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
         } else if (msg.includes('Failed to fetch')) {
