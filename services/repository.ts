@@ -13,21 +13,15 @@ const safeUUID = () => {
     });
 };
 
-// Helper: Extract Error Message safely
 export const getErrorMessage = (error: any): string => {
     if (!error) return 'Unknown error';
     if (typeof error === 'string') return error;
     if (error.message) return error.message;
     if (error.error_description) return error.error_description;
     if (error.details) return error.details;
-    try {
-        return JSON.stringify(error, null, 2);
-    } catch (e) {
-        return "Internal Error";
-    }
+    try { return JSON.stringify(error, null, 2); } catch (e) { return "Internal Error"; }
 };
 
-// 🛡️ Safe Environment Variable Access
 const getEnv = (key: string) => {
     try {
         // @ts-ignore
@@ -35,7 +29,6 @@ const getEnv = (key: string) => {
     } catch { return ""; }
 };
 
-// 默认配置 (仅作为数据库为空时的兜底，不包含本地缓存)
 const DEFAULT_CONFIG: SystemConfig = {
     gemini: { 
         apiKey: getEnv('API_KEY') || "", 
@@ -60,33 +53,20 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 // --- CONFIG REPOSITORY ---
 export const configRepo = {
-    // 🟢 核心修改：只从数据库读取，完全忽略 localStorage
     getSystemConfig: async (): Promise<SystemConfig> => {
         let dbConfig: any = null;
 
+        // 🟢 严格只从数据库读取
         if (supabase) {
             try {
-                // 强制从 DB 获取
-                const { data, error } = await supabase
-                    .from('app_config')
-                    .select('value')
-                    .eq('key', 'global_config')
-                    .maybeSingle();
-                
+                const { data, error } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
                 if (!error && data?.value) {
                     dbConfig = data.value;
-                    // console.log("[Config] Loaded strictly from Database");
-                } else if (error && error.code !== 'PGRST116') {
-                    console.warn("[Config] DB Load Error:", error);
                 }
-            } catch (e) { 
-                console.warn("[Config] Connection Error:", e); 
-            }
+            } catch (e) { console.warn("[Config] DB Error:", e); }
         }
 
-        // 深度合并：数据库配置 > 默认(环境变量)配置
-        // 如果数据库里没有 gemini 配置，就用默认的，否则用数据库的
-        // 绝对不读取 localStorage ('rednote_sys_config')
+        // ❌ 绝对不再读取 localStorage
         
         const mergedGemini = { ...DEFAULT_CONFIG.gemini, ...(dbConfig?.gemini || {}) };
         const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}) };
@@ -102,179 +82,118 @@ export const configRepo = {
     },
 
     saveSystemConfig: async (config: SystemConfig) => {
-        if (!supabase) throw new Error("数据库未连接，无法保存配置");
-        
-        // 仅保存到数据库
+        if (!supabase) throw new Error("数据库未连接");
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
-        
         if (error) {
-            console.error("Config Save Error:", error);
-            if (error.code === '42P01') { 
-                throw new Error("云端保存失败：数据库缺少 'app_config' 表。请联系管理员创建。");
-            }
+            if (error.code === '42P01') throw new Error("数据库表 'app_config' 不存在");
             throw new Error(getErrorMessage(error));
         }
     }
 };
 
-// --- USER REPOSITORY (unchanged logic, strictly DB) ---
+// --- USER REPOSITORY (Unchanged) ---
 export const userRepo = {
   recordLogin: async (userId: string, ip: string, location: string) => {
       if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
           const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
-          const currentData = data?.data || {};
-          const newData = { ...currentData, lastIp: ip, location: location, lastLoginAt: Date.now() };
+          const newData = { ...(data?.data || {}), lastIp: ip, location: location, lastLoginAt: Date.now() };
           await supabase.from('profiles').update({ data: newData }).eq('id', userId);
       } catch (e) {}
   },
-
   updateHeartbeat: async (userId: string, secondsToAdd: number) => {
       if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
           const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
-          const currentData = data?.data || {};
-          const newData = { ...currentData, totalOnlineSeconds: (currentData.totalOnlineSeconds || 0) + secondsToAdd, lastActiveAt: Date.now() };
+          const newData = { ...(data?.data || {}), totalOnlineSeconds: (data?.data?.totalOnlineSeconds || 0) + secondsToAdd, lastActiveAt: Date.now() };
           await supabase.from('profiles').update({ data: newData }).eq('id', userId);
       } catch (e) {}
   },
-
   incrementInteraction: async (userId: string) => {
       if (!supabase || userId === 'admin_user_001' || userId.startsWith('00000000')) return;
       try {
           const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
-          const currentData = data?.data || {};
-          const newData = { ...currentData, interactionCount: (currentData.interactionCount || 0) + 1 };
+          const newData = { ...(data?.data || {}), interactionCount: (data?.data?.interactionCount || 0) + 1 };
           await supabase.from('profiles').update({ data: newData }).eq('id', userId);
       } catch (e) {}
   },
-
   login: async (username: string, code: string): Promise<{ user: User | null; error: string | null }> => {
-    if (!supabase) return { user: null, error: '系统未初始化 (DB Disconnected)' };
-
+    if (!supabase) return { user: null, error: 'DB Disconnected' };
     const cleanUsername = username.trim();
     const cleanCode = code.trim();
-
     try {
         let rawData = null;
-        // 1. RPC
         const { data: rpcData, error: rpcError } = await supabase.rpc('login_user', { _username: cleanUsername, _password: cleanCode });
-        
         if (rpcError) {
-             // 2. Direct Fallback
-             const { data: directData } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('username', cleanUsername)
-                .eq('password', cleanCode)
-                .maybeSingle();
+             const { data: directData } = await supabase.from('profiles').select('*').eq('username', cleanUsername).eq('password', cleanCode).maybeSingle();
              if (!directData) return { user: null, error: '账号或密码错误' };
              rawData = directData;
         } else {
             rawData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
         }
-
         if (!rawData) return { user: null, error: '账号或密码错误' };
-        
         const extraData = rawData.data || {};
         if (extraData.isDeleted) return { user: null, error: '账号不存在' };
         if (extraData.isSuspended) return { user: null, error: '账号已停用' };
-
         return { 
             user: {
-                id: rawData.id,
-                username: rawData.username,
-                role: rawData.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
-                inviteCode: cleanCode,
-                totalQuota: 100,
-                quotaRemaining: rawData.quota_remaining || 0,
-                expiryDate: '2099-12-31',
-                createdAt: new Date(rawData.created_at).getTime(),
-                isSuspended: false,
-                lastIp: extraData.lastIp,
-                totalOnlineSeconds: extraData.totalOnlineSeconds || 0,
-                interactionCount: extraData.interactionCount || 0,
-                lastLoginAt: extraData.lastLoginAt,
-                location: extraData.location,
-                avatar: extraData.avatar
-            }, 
-            error: null 
+                id: rawData.id, username: rawData.username, role: rawData.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
+                inviteCode: cleanCode, totalQuota: 100, quotaRemaining: rawData.quota_remaining || 0, expiryDate: '2099-12-31',
+                createdAt: new Date(rawData.created_at).getTime(), isSuspended: false, lastIp: extraData.lastIp,
+                totalOnlineSeconds: extraData.totalOnlineSeconds || 0, interactionCount: extraData.interactionCount || 0,
+                lastLoginAt: extraData.lastLoginAt, location: extraData.location, avatar: extraData.avatar
+            }, error: null 
         };
-    } catch (e: any) { 
-        return { user: null, error: `请求失败: ${getErrorMessage(e)}` }; 
-    }
+    } catch (e: any) { return { user: null, error: `Login Error: ${getErrorMessage(e)}` }; }
   },
-
   listUsers: async (includeDeleted: boolean = false): Promise<User[]> => {
       if (!supabase) return [];
       const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
       return (data || []).map((row: any) => ({
-          id: row.id,
-          username: row.username,
-          role: row.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
-          inviteCode: row.password, 
-          totalQuota: 100,
-          quotaRemaining: row.quota_remaining,
-          expiryDate: '2099-12-31',
-          createdAt: new Date(row.created_at).getTime(),
-          isSuspended: row.data?.isSuspended || false,
-          isDeleted: row.data?.isDeleted || false,
-          lastIp: row.data?.lastIp || '-',
-          totalOnlineSeconds: row.data?.totalOnlineSeconds || 0,
-          interactionCount: row.data?.interactionCount || 0,
-          lastLoginAt: row.data?.lastLoginAt,
-          location: row.data?.location,
-          avatar: row.data?.avatar
+          id: row.id, username: row.username, role: row.role === 'admin' ? UserRole.ADMIN : UserRole.USER,
+          inviteCode: row.password, totalQuota: 100, quotaRemaining: row.quota_remaining, expiryDate: '2099-12-31',
+          createdAt: new Date(row.created_at).getTime(), isSuspended: row.data?.isSuspended || false,
+          isDeleted: row.data?.isDeleted || false, lastIp: row.data?.lastIp || '-',
+          totalOnlineSeconds: row.data?.totalOnlineSeconds || 0, interactionCount: row.data?.interactionCount || 0,
+          lastLoginAt: row.data?.lastLoginAt, location: row.data?.location, avatar: row.data?.avatar
       })).filter((u: User) => includeDeleted ? true : !u.isDeleted);
   },
-
   createUser: async (username: string, code: string): Promise<{ success: boolean; error?: string }> => {
       if (!supabase) return { success: false, error: "DB Disconnected" };
-      const cleanUsername = username.trim();
-      const cleanCode = code.trim();
-      
-      const { data: existing } = await supabase.from('profiles').select('id, data').eq('username', cleanUsername).maybeSingle();
+      const { data: existing } = await supabase.from('profiles').select('id, data').eq('username', username.trim()).maybeSingle();
       if (existing) {
           if (existing.data?.isDeleted) {
-               const { error } = await supabase.from('profiles').update({ password: cleanCode, data: { ...existing.data, isDeleted: false, isSuspended: false } }).eq('id', existing.id);
-               return error ? { success: false, error: getErrorMessage(error) } : { success: true };
+               await supabase.from('profiles').update({ password: code.trim(), data: { ...existing.data, isDeleted: false, isSuspended: false } }).eq('id', existing.id);
+               return { success: true };
           }
           return { success: false, error: '用户名已存在' };
       }
-      
       const { error } = await supabase.from('profiles').insert({ 
-          id: safeUUID(), username: cleanUsername, password: cleanCode, role: 'user', quota_remaining: 100,
+          id: safeUUID(), username: username.trim(), password: code.trim(), role: 'user', quota_remaining: 100,
           data: { isDeleted: false, isSuspended: false, interactionCount: 0, totalOnlineSeconds: 0 }
       });
       return { success: !error, error: error ? getErrorMessage(error) : undefined };
   },
-
   updateUserCredentials: async (userId: string, newUsername: string, newPassword: string) => {
       if (!supabase) return;
       await supabase.from('profiles').update({ username: newUsername.trim(), password: newPassword.trim() }).eq('id', userId);
   },
-
   toggleUserSuspension: async (userId: string, suspend: boolean) => {
       if (!supabase) return;
       const { data } = await supabase.from('profiles').select('data').eq('id', userId).single();
-      const newData = { ...(data?.data || {}), isSuspended: suspend };
-      await supabase.from('profiles').update({ data: newData }).eq('id', userId);
+      await supabase.from('profiles').update({ data: { ...(data?.data || {}), isSuspended: suspend } }).eq('id', userId);
   },
-
   deleteUser: async (userId: string): Promise<{success: boolean, message?: string}> => {
       if (!supabase) return { success: false, message: "数据库未连接" };
-      if (userId === 'admin_user_001' || userId.startsWith('00000000')) return { success: false, message: "无法删除超级管理员" };
+      if (userId === 'admin_user_001') return { success: false, message: "无法删除超级管理员" };
       try {
           const { data: current } = await supabase.from('profiles').select('data').eq('id', userId).single();
-          const newData = { ...(current?.data || {}), isDeleted: true, deletedAt: Date.now() };
-          const { error } = await supabase.from('profiles').update({ data: newData }).eq('id', userId);
-          if (error) return { success: false, message: getErrorMessage(error) };
+          await supabase.from('profiles').update({ data: { ...(current?.data || {}), isDeleted: true, deletedAt: Date.now() } }).eq('id', userId);
           return { success: true, message: "用户已移除" };
       } catch (e) { return { success: false, message: getErrorMessage(e) }; }
   },
-
   updateQuota: async (userId: string, newQuota: number) => {
-      if (!supabase || userId === 'admin') return;
+      if (!supabase) return;
       await supabase.from('profiles').update({ quota_remaining: newQuota }).eq('id', userId);
   },
 };
@@ -282,14 +201,14 @@ export const userRepo = {
 export const fileRepo = {
     saveUpload: async (userId: string, fileRecord: Partial<UserUpload>) => {
         if (!supabase) return;
-        try { await supabase.from('user_uploads').insert({ id: safeUUID(), user_id: userId, file_url: fileRecord.file_url, file_type: fileRecord.file_type, file_name: fileRecord.file_name, file_size: fileRecord.file_size || 0, created_at: new Date().toISOString() }); } catch (e) {}
+        try { await supabase.from('user_uploads').insert({ id: safeUUID(), user_id: userId, ...fileRecord, created_at: new Date().toISOString() }); } catch (e) {}
     }
 };
 
 export const linkRepo = {
     saveLink: async (userId: string, linkRecord: Partial<SavedLink>) => {
         if (!supabase) return;
-        try { await supabase.from('saved_links').insert({ id: safeUUID(), user_id: userId, original_url: linkRecord.original_url, page_title: linkRecord.page_title, summary: linkRecord.summary, created_at: new Date().toISOString() }); } catch (e) {}
+        try { await supabase.from('saved_links').insert({ id: safeUUID(), user_id: userId, ...linkRecord, created_at: new Date().toISOString() }); } catch (e) {}
     }
 };
 
@@ -316,10 +235,8 @@ export const projectRepo = {
     if (!supabase) return null;
     const isNew = project.id.startsWith('temp-');
     const finalId = isNew ? safeUUID() : project.id;
-
     const dbPayload = {
-        id: finalId,
-        user_id: userId, name: project.name, updated_at: new Date(project.updatedAt).toISOString(),
+        id: finalId, user_id: userId, name: project.name, updated_at: new Date(project.updatedAt).toISOString(),
         data: {
             contextText: project.contextText, persona: project.persona, fidelity: project.fidelity, 
             chatHistory: project.chatHistory, attachedFiles: project.attachedFiles, socialNotes: project.socialNotes,
@@ -337,8 +254,7 @@ export const projectRepo = {
       if (!supabase) throw new Error("数据库未连接");
       const { data: current } = await supabase.from('projects').select('data').eq('id', projectId).single();
       if (!current) return; 
-      const newData = { ...(current.data || {}), isDeleted: true };
-      await supabase.from('projects').update({ data: newData }).eq('id', projectId);
+      await supabase.from('projects').update({ data: { ...(current.data || {}), isDeleted: true } }).eq('id', projectId);
   },
 
   aggregateUserAssets: async (userId: string, includeDeleted: boolean = false): Promise<{ personas: any[]; assets: any[]; finished: any[]; }> => {
