@@ -182,7 +182,6 @@ const callOpenAI = async (
     if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
     
     // 🟢 强制补全 /v1 (如果用户漏填，且不是特殊的无版本网关)
-    // 许多用户会只填 https://api.vectorengine.ai，导致 404
     if (!baseUrl.endsWith('/v1') && !baseUrl.endsWith('/v1beta')) {
         baseUrl = `${baseUrl}/v1`;
     }
@@ -250,7 +249,7 @@ const callOpenAI = async (
                             onToken(content); // Pass Delta
                         }
                     } catch (e) {
-                        // Ignore parse errors for keep-alive or malformed chunks
+                        // Ignore parse errors
                     }
                 }
             }
@@ -323,7 +322,19 @@ export const streamExpertGeneration = async (
     context: string, files: AttachedFile[], personaPrompt: string | undefined, fidelity: FidelityMode, count: number, wordLimit: number,
     onToken: (text: string, thought: string) => void
 ) => {
-    const systemText = `You are a content expert. Output in Chinese. ${personaPrompt || ''} ${count > 1 ? 'Generate ' + count + ' versions via ### 方案1 format.' : 'Generate 1 version.'}`;
+    // 🟢 严谨模式 (Strict Mode) 强化逻辑
+    const strictInstruction = fidelity === FidelityMode.STRICT
+        ? "【IMPORTANT: STRICT MODE ACTIVE】\n1. You MUST strictly base your content ONLY on the provided context (Context) and files. \n2. Do NOT hallucinate, do NOT invent features, do NOT add external facts that are not in the source materials.\n3. If the context is empty or insufficient, state that clearly instead of making things up.\n4. Stick faithfully to the facts provided."
+        : "【Creative Mode】\nYou are allowed to expand creatively on the topic, using your knowledge of social media trends to enhance the content.";
+
+    const systemText = `You are a professional Xiaohongshu (RedNote) content expert. Output in Chinese (Simplified). 
+    
+    ${personaPrompt || ''}
+    
+    ${strictInstruction}
+    
+    ${count > 1 ? 'Generate ' + count + ' distinct versions via ### 方案1 format.' : 'Generate 1 high-quality version.'}`;
+
     try {
         const config = await configRepo.getSystemConfig();
         const fileParts = await Promise.all(files.map(prepareOpenAIPart));

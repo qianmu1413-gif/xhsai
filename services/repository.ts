@@ -60,7 +60,7 @@ export const configRepo = {
         let dbConfig: any = null;
         let localConfig: any = null;
 
-        // 1. 获取 LocalStorage 配置 (作为最新编辑的备份)
+        // 1. 获取 LocalStorage 配置 (作为最新编辑的备份，且是快速回退选项)
         try {
             const localStr = localStorage.getItem(LOCAL_STORAGE_CONFIG_KEY);
             if (localStr) {
@@ -68,14 +68,24 @@ export const configRepo = {
             }
         } catch (e) {}
 
-        // 2. 尝试从 Supabase 获取配置
+        // 2. 尝试从 Supabase 获取配置 (带超时熔断)
         if (supabase) {
             try {
-                const { data, error } = await supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
-                if (!error && data?.value) {
-                    dbConfig = data.value;
+                // ⚡️ 性能优化：如果数据库在 1.5秒内没反应，直接使用本地配置或默认配置，不再阻塞 UI
+                const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("DB Timeout")), 1500));
+                
+                const dbPromise = supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
+                
+                // Race: Database vs Timeout
+                const result = await Promise.race([dbPromise, timeout]) as any;
+                
+                if (result && !result.error && result.data?.value) {
+                    dbConfig = result.data.value;
                 }
-            } catch (e) { console.warn("[Config] DB Error:", e); }
+            } catch (e) { 
+                // Silently fail on timeout or error, proceed with local config
+                console.warn("[Config] DB Fetch skipped (slow connection or offline). Using LocalStorage."); 
+            }
         }
 
         const baseGemini = dbConfig?.gemini || {};
@@ -85,10 +95,7 @@ export const configRepo = {
         let baseUrl = (localGemini.baseUrl || baseGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim();
         let model = (localGemini.model || baseGemini.model || DEFAULT_CONFIG.gemini.model || "").trim();
 
-        // 🚨 强制纠错逻辑：
-        // 如果用户使用的是 sk- 开头的 Key（第三方中转 Key），
-        // 但 Base URL 却是空的，或者是 Google 官方地址 (googleapis.com)，
-        // 则强制修正为 VectorEngine 地址。这能防止因为缓存了旧配置导致请求发往 Google 而报错。
+        // 🚨 强制纠错逻辑
         if (apiKey.startsWith('sk-')) {
             if (!baseUrl || baseUrl.includes('googleapis.com')) {
                 console.warn("Detected 'sk-' key with invalid/google base URL. Forcing update to VectorEngine.");
@@ -121,7 +128,6 @@ export const configRepo = {
         
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) {
-            // 如果表不存在，仅警告
             if (error.code === '42P01') {
                 console.warn("Table 'app_config' missing. Config saved locally only.");
                 return;

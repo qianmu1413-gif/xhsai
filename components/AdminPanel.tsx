@@ -60,19 +60,30 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
   };
 
   useEffect(() => {
-    loadConfig();
-    refreshUserList();
+    // ⚡️ 性能优化：并行加载配置和用户列表，不再串行等待
+    const initData = async () => {
+        setLoadingUsers(true);
+        // Load Config and Users in parallel
+        await Promise.all([
+            loadConfig(),
+            refreshUserList()
+        ]);
+        setLoadingUsers(false);
+    };
+
+    initData();
     const interval = setInterval(refreshUserList, 120000);
     return () => clearInterval(interval);
   }, []);
 
   const loadConfig = async () => {
-      const cfg = await configRepo.getSystemConfig();
-      setSysConfig(cfg);
+      try {
+        const cfg = await configRepo.getSystemConfig();
+        setSysConfig(cfg);
+      } catch (e) { console.warn("Failed to load config", e); }
   };
 
   const refreshUserList = async () => {
-      setLoadingUsers(true);
       const list = await userRepo.listUsers(true);
       setUsers(list);
       
@@ -91,8 +102,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
       setTotalOnlineTime(totalTime);
       setTotalInteractions(interactions);
       setActiveUsersToday(activeToday);
-      
-      setLoadingUsers(false);
   };
 
   const checkAI = async () => {
@@ -131,9 +140,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
         if (res.success) {
             await refreshUserList(); 
             showToast(`账号创建成功: ${newUser.username}`);
-            // Fix: Keep the password visible for a moment or until the user clears it, 
-            // but the original logic cleared it. We'll show a persistent toast instead or just not clear it?
-            // Let's copy it to clipboard to be safe.
             navigator.clipboard.writeText(`账号:${newUser.username}\n密码:${newUser.password}`);
             showToast(`账号已创建，密码已复制到剪贴板`);
             setNewUser({ username: '', password: '' });
@@ -271,7 +277,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
           </div>
       </div>
 
-      {/* User Management Section - RESTORED */}
+      {/* User Management Section */}
       <div className="flex-1 flex flex-col min-h-0 relative z-10">
           <div className="flex justify-between items-center mb-4">
               <div className="flex gap-4">
@@ -366,7 +372,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
           </div>
       </div>
 
-      {/* Config Modal */}
+      {/* Config Modal (Unchanged) */}
       {showConfigModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-fade-in">
               <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl shadow-2xl rounded-2xl overflow-hidden relative">
@@ -386,7 +392,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
                                       {sysStatus.success === true && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-500 border border-emerald-900/30">✓ 连接成功</span>}
                                       {sysStatus.success === false && <span className="text-[10px] px-2 py-0.5 rounded bg-red-950 text-red-500 border border-red-900/30">× 连接失败</span>}
                                   </div>
-                                  {/* Status Message Area */}
                                   {sysStatus.message && (
                                     <div className={`text-[10px] px-3 py-2 rounded-lg leading-relaxed font-mono whitespace-pre-wrap ${sysStatus.success === false ? 'bg-red-950/20 text-red-400 border border-red-900/20' : 'bg-slate-900 text-slate-500'}`}>
                                         {sysStatus.message}
