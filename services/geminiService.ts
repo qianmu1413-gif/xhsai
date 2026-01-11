@@ -147,7 +147,7 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e) { return { text: `[错误]` }; }
 };
 
-// 🟢 修复后的拦截器：仅针对 sk- Key 做处理
+// 🟢 修复后的拦截器：更温和的 Header 处理
 const createCustomFetch = (apiKey: string) => {
     return async (url: RequestInfo | URL, init?: RequestInit) => {
         let fetchUrlStr = url.toString();
@@ -157,24 +157,20 @@ const createCustomFetch = (apiKey: string) => {
         const isSkKey = apiKey.startsWith('sk-');
 
         if (isSkKey) {
-            // 1. 清除 URL 参数中的 key (这是导致 400 Invalid Key 的核心原因)
-            const urlObj = new URL(fetchUrlStr);
-            if (urlObj.searchParams.has('key')) {
-                urlObj.searchParams.delete('key');
-                fetchUrlStr = urlObj.toString();
-            }
-
-            // 2. 重构 Headers
             const headers = new Headers(fetchInit.headers || {});
             
-            // 移除 Google 专用头，避免网关混淆
-            if (headers.has('x-goog-api-key')) {
-                headers.delete('x-goog-api-key');
+            // 兼容性修复：不要删除 x-goog-api-key 或 key 参数。
+            // 许多 Gemini 网关仍然需要它们来识别身份，即使使用了 sk- Key。
+            // 我们只额外添加 Authorization 头，以防万一网关需要它。
+            
+            if (!headers.has('Authorization')) {
+                headers.set('Authorization', `Bearer ${apiKey}`);
             }
             
-            // 注入 OpenAI 风格的鉴权
-            headers.set('Authorization', `Bearer ${apiKey}`);
-            headers.set('Content-Type', 'application/json');
+            // 确保 Content-Type 正确
+            if (!headers.has('Content-Type')) {
+                headers.set('Content-Type', 'application/json');
+            }
 
             fetchInit.headers = headers;
         }
