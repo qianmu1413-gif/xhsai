@@ -147,43 +147,60 @@ const prepareFilePart = async (file: AttachedFile): Promise<any> => {
     } catch (e) { return { text: `[错误]` }; }
 };
 
-// 🟢 修复后的拦截器：sk- Key 终极兼容模式
+// 🟢 增强型拦截器：完美兼容 Request 对象、URL 对象和字符串
 const createCustomFetch = (apiKey: string) => {
-    return async (url: RequestInfo | URL, init?: RequestInit) => {
-        let fetchUrlStr = url.toString();
-        const fetchInit = init || {};
-        
-        // 判断是否为 "sk-" 开头的 Key
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+        let urlStr: string;
+        let finalInit: RequestInit = init || {};
+
+        // 1. 统一提取 URL 字符串
+        if (typeof input === 'string') {
+            urlStr = input;
+        } else if (input instanceof URL) {
+            urlStr = input.toString();
+        } else if (typeof input === 'object' && 'url' in input) {
+            // 处理 Request 对象的情况
+            urlStr = input.url;
+            // 如果 input 是 Request 对象，我们需要继承它的配置
+            // 但通常 SDK 会传入 init，所以我们主要关注 URL 和 Headers
+        } else {
+            urlStr = String(input);
+        }
+
+        // 2. sk- Key 特殊处理逻辑
         const isSkKey = apiKey.startsWith('sk-');
 
         if (isSkKey) {
-            // 1. 彻底移除 URL 参数中的 key
-            // 这是解决 "API key not valid" (400) 的关键
-            // 如果网关透传了 "?key=sk-xxx" 给 Google，Google 会直接报错。
-            try {
-                const urlObj = new URL(fetchUrlStr);
-                if (urlObj.searchParams.has('key')) {
-                    urlObj.searchParams.delete('key');
-                    fetchUrlStr = urlObj.toString();
-                }
-            } catch (e) {
-                // Ignore URL parse errors
+            const headers = new Headers(finalInit.headers || {});
+            
+            // 策略：双重保险。
+            // 许多网关支持 Authorization: Bearer，也支持 x-goog-api-key。我们都带上。
+            if (!headers.has('Authorization')) {
+                headers.set('Authorization', `Bearer ${apiKey}`);
             }
-
-            // 2. 双重 Header 注入：Authorization + x-goog-api-key
-            // 无论网关喜欢哪种风格，都给它，最大程度兼容。
-            const headers = new Headers(fetchInit.headers || {});
-            headers.set('Authorization', `Bearer ${apiKey}`);
             headers.set('x-goog-api-key', apiKey);
             
             if (!headers.has('Content-Type')) {
                 headers.set('Content-Type', 'application/json');
             }
 
-            fetchInit.headers = headers;
+            // 关键：移除 URL 中的 ?key= 参数
+            // Google 官方 API 如果收到无效的 key 参数会直接报 400，即使 Header 是对的。
+            // 既然是 sk- Key，我们假设它是给网关用的，通过 Header 传递更标准。
+            try {
+                const urlObj = new URL(urlStr);
+                if (urlObj.searchParams.has('key')) {
+                    urlObj.searchParams.delete('key');
+                    urlStr = urlObj.toString();
+                }
+            } catch (e) {
+                console.warn("[GeminiService] URL clean failed:", e);
+            }
+
+            finalInit = { ...finalInit, headers };
         }
 
-        return fetch(fetchUrlStr, fetchInit);
+        return fetch(urlStr, finalInit);
     };
 };
 
@@ -303,7 +320,12 @@ export const streamExpertGeneration = async (
         let parsedNotes = count > 1 ? parseBulkNotes(cleaned) : [parseSingleNote(cleaned)].filter(n => n) as BulkNote[];
         return { dialogueText: cleaned, thought: "", notes: parsedNotes };
     } catch (e: any) {
-        return { dialogueText: `生成出错: ${e.message}`, thought: "", notes: [] };
+        // 优化错误提示，指导用户修复配置
+        let errorMsg = e.message;
+        if (errorMsg.includes('400') && errorMsg.includes('API key not valid')) {
+            errorMsg = "API Key 无效 (400)。请检查：\n1. 如果使用 'sk-' Key，请务必在后台配置正确的 Base URL (第三方网关地址)。\n2. 确保 Base URL 不包含 'googleapis.com'。";
+        }
+        return { dialogueText: `生成出错: ${errorMsg}`, thought: "", notes: [] };
     }
 };
 
@@ -357,7 +379,7 @@ export const testConnection = async (inputConfig?: SystemConfig) => {
         let msg = e.message || "未知错误";
         // 智能错误诊断
         if (msg.includes('400') || msg.includes('API key not valid') || msg.includes('INVALID_ARGUMENT')) {
-            msg = `[400 认证失败] Key 或参数无效。\n如果使用非 Gemini 3 模型，系统已移除 Thinking 参数以兼容旧模型。\n如果使用 sk- Key，请确保 Base URL 配置正确。`;
+            msg = `[400 认证失败] Key 或参数无效。\n⚠️ 重点检查：\n1. sk- Key 必须配合 Base URL (网关) 使用。\n2. Base URL 是否为空？\n3. 如果是官方 Google Key，请留空 Base URL。`;
         } else if (msg.includes('404')) {
             msg = `[404 路径错误] 模型未找到。\n请检查 Model 字段 (${inputConfig?.gemini?.model}) 或 Base URL 是否正确。`;
         } else if (msg.includes('Failed to fetch')) {
