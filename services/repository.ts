@@ -55,6 +55,7 @@ const DEFAULT_CONFIG: SystemConfig = {
 const LOCAL_STORAGE_CONFIG_KEY = 'rednote_system_config_v1';
 
 // 🟢 内存缓存：大幅减少数据库读取频次，提升 AI 生成速度
+// 注意：这只是 JS 变量，刷新页面即消失，不属于持久化本地存储，是安全的。
 let _memoryConfigCache: SystemConfig | null = null;
 let _memoryConfigTime = 0;
 const CACHE_TTL = 1000 * 60 * 5; // 5分钟缓存
@@ -62,27 +63,23 @@ const CACHE_TTL = 1000 * 60 * 5; // 5分钟缓存
 // --- CONFIG REPOSITORY ---
 export const configRepo = {
     getSystemConfig: async (): Promise<SystemConfig> => {
-        // 1. 优先检查内存缓存 (极速响应)
+        // 1. 优先检查内存缓存 (极速响应，非持久化)
         if (_memoryConfigCache && (Date.now() - _memoryConfigTime < CACHE_TTL)) {
             return _memoryConfigCache;
         }
 
         let dbConfig: any = null;
-        let localConfig: any = null;
 
-        // 2. 获取 LocalStorage 配置 (作为最新编辑的备份，且是快速回退选项)
+        // ❌ 彻底移除 LocalStorage 读取，并主动清理残留数据
         try {
-            const localStr = localStorage.getItem(LOCAL_STORAGE_CONFIG_KEY);
-            if (localStr) {
-                localConfig = JSON.parse(localStr);
-            }
+            localStorage.removeItem(LOCAL_STORAGE_CONFIG_KEY);
         } catch (e) {}
 
-        // 3. 尝试从 Supabase 获取配置 (带超时熔断)
+        // 2. 尝试从 Supabase 获取配置 (带超时熔断)
         if (supabase) {
             try {
-                // ⚡️ 性能优化：超时熔断从 1.5s 降为 800ms，提升感知速度
-                const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("DB Timeout")), 800));
+                // ⚡️ 性能优化：超时熔断
+                const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("DB Timeout")), 3000));
                 
                 const dbPromise = supabase.from('app_config').select('value').eq('key', 'global_config').maybeSingle();
                 
@@ -93,17 +90,16 @@ export const configRepo = {
                     dbConfig = result.data.value;
                 }
             } catch (e) { 
-                // Silently fail on timeout or error, proceed with local config
-                // console.warn("[Config] DB Fetch skipped (slow connection or offline). Using LocalStorage."); 
+                console.warn("[Config] DB Fetch skipped (slow connection or offline). Using Defaults."); 
             }
         }
 
         const baseGemini = dbConfig?.gemini || {};
-        const localGemini = localConfig?.gemini || {};
 
-        let apiKey = (localGemini.apiKey || baseGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim();
-        let baseUrl = (localGemini.baseUrl || baseGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim();
-        let model = (localGemini.model || baseGemini.model || DEFAULT_CONFIG.gemini.model || "").trim();
+        // 仅使用 DB 数据或环境变量默认值
+        let apiKey = (baseGemini.apiKey || DEFAULT_CONFIG.gemini.apiKey || "").trim();
+        let baseUrl = (baseGemini.baseUrl || DEFAULT_CONFIG.gemini.baseUrl || "").trim();
+        let model = (baseGemini.model || DEFAULT_CONFIG.gemini.model || "").trim();
 
         // 🚨 强制纠错逻辑
         if (apiKey.startsWith('sk-')) {
@@ -115,9 +111,9 @@ export const configRepo = {
 
         const mergedGemini = { apiKey, baseUrl, model };
 
-        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}), ...(localConfig?.xhs || {}) };
-        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}), ...(localConfig?.publish || {}) };
-        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(dbConfig?.cos || {}), ...(localConfig?.cos || {}) };
+        const mergedXhs = { ...DEFAULT_CONFIG.xhs, ...(dbConfig?.xhs || {}) };
+        const mergedPublish = { ...DEFAULT_CONFIG.publish, ...(dbConfig?.publish || {}) };
+        const mergedCos = { ...DEFAULT_CONFIG.cos, ...(dbConfig?.cos || {}) };
 
         const finalConfig = {
             gemini: mergedGemini,
@@ -126,7 +122,7 @@ export const configRepo = {
             cos: mergedCos
         };
 
-        // 4. 更新内存缓存
+        // 3. 更新内存缓存 (Runtime Only)
         _memoryConfigCache = finalConfig;
         _memoryConfigTime = Date.now();
 
@@ -138,19 +134,18 @@ export const configRepo = {
         _memoryConfigCache = config;
         _memoryConfigTime = Date.now();
 
-        // 1. 总是先保存到 LocalStorage
+        // ❌ 彻底移除 LocalStorage 写入，确保 Key 不落地
         try {
-            localStorage.setItem(LOCAL_STORAGE_CONFIG_KEY, JSON.stringify(config));
-        } catch (e) { console.error("LocalStorage Save Failed", e); }
+            localStorage.removeItem(LOCAL_STORAGE_CONFIG_KEY);
+        } catch (e) {}
 
-        // 2. 尝试同步到 Supabase
-        if (!supabase) return; 
+        // 2. 仅同步到 Supabase
+        if (!supabase) throw new Error("数据库未连接，无法保存配置到云端");
         
         const { error } = await supabase.from('app_config').upsert({ key: 'global_config', value: config });
         if (error) {
             if (error.code === '42P01') {
-                console.warn("Table 'app_config' missing. Config saved locally only.");
-                return;
+                throw new Error("Table 'app_config' missing. Cannot save config.");
             }
             throw new Error(getErrorMessage(error));
         }

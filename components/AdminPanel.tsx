@@ -76,6 +76,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout, onEnterWorkstation, o
     return () => clearInterval(interval);
   }, []);
 
+  // 🟢 确保每次打开配置面板时，都强制刷新一次配置 (以防本地缓存与云端不一致)
+  useEffect(() => {
+      if (showConfigModal) {
+          loadConfig();
+      }
+  }, [showConfigModal]);
+
   const loadConfig = async () => {
       try {
         const cfg = await configRepo.getSystemConfig();
